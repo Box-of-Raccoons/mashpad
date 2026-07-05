@@ -1,0 +1,20 @@
+[Unit]
+Description=mashpad — baby keyboard smasher
+After=systemd-user-sessions.service sound.target
+Conflicts=getty@tty1.service
+
+[Service]
+User=@USER@
+SupplementaryGroups=video input audio render tty
+WorkingDirectory=@REPO@
+Environment=PYTHONPATH=@REPO@
+Environment=SDL_VIDEODRIVER=kmsdrm
+ExecStart=/usr/bin/python3 -m mashpad
+Restart=always
+RestartSec=2
+TTYPath=/dev/tty1
+StandardInput=tty
+StandardOutput=journal
+
+[Install]
+WantedBy=multi-user.target
