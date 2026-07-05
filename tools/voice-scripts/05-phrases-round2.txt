@@ -1,0 +1,49 @@
+[gentle] Hi there! Let's play!
+
+[enthusiasm] Hello! Ready to play?
+
+[excited] Welcome back!
+
+[excited] Hi friend!
+
+[enthusiasm] Let's play with letters!
+
+[gentle] Haha, slow down!
+
+[laughing] Whoa, so fast!
+
+[laughing] Let's be nice to the keyboard!
+
+[proud] Those are some fast fingers!
+
+[gentle] One at a time, silly goose!
+
+[excited] Wow, look at all of those!
+
+[surprised] The screen is SO full!
+
+[proud] Amazing! Look at everything!
+
+[excited] It's getting busy in here!
+
+[surprised] You filled the whole screen!
+
+[gentle] Look at all the fun raccoons!
+
+[proud] The raccoons love you!
+
+[excited] So many raccoons!
+
+[laughing] It's a raccoon party!
+
+[gentle] You must really love raccoons!
+
+[gentle] You seem like you're having fun!
+
+[excited] Wow, great job!
+
+[laughing] This is so much fun!
+
+[proud] Look at you go!
+
+[enthusiasm] You're doing amazing!
