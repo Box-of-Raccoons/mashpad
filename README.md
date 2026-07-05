@@ -88,6 +88,37 @@ By default, audio routes to whichever output is active in `raspi-config`:
 **Advanced Options → Audio** — choose between HDMI and the 3.5 mm headphone
 jack. Run `raspi-config` over SSH or before the first reboot.
 
+## Desktop (Windows)
+
+mashpad also ships as a standalone Windows app (a frozen PyInstaller build — see
+the packaging notes). When it runs **fullscreen** it installs an OS-level
+keyboard lockdown so a baby can't escape or close the app by mashing system
+combos. It swallows:
+
+| Combo | Normally does |
+|-------|---------------|
+| **Windows key** (left/right) | Opens the Start menu |
+| **Alt+Tab** | Switches windows |
+| **Alt+F4** | Closes the app |
+| **Alt+Esc** | Cycles windows |
+| **Ctrl+Esc** | Opens the Start menu |
+
+It **cannot** intercept **Ctrl+Alt+Del** — that's a Secure Attention Sequence
+the OS reserves, and no application (this one included) can trap it. That's your
+guaranteed way out if you ever need it.
+
+The grown-up combos still work as always: **Ctrl+Alt+O** opens the options menu
+and **Ctrl+Alt+Q** quits the app.
+
+The lockdown is active only in fullscreen. Windowed runs (`--windowed`) never
+hook, and you can force it off in fullscreen with **`--no-lockdown`**. It is a
+silent no-op on Raspberry Pi / Linux — that platform is unaffected.
+
+In the installed Windows app, settings are saved to
+**`%APPDATA%\mashpad\settings.json`** (not next to the read-only program files).
+Deleting that file restores the defaults. Running from a source checkout (dev +
+Pi) still keeps `settings.json` in the repo root as before.
+
 ## Controls
 
 | Input | Action |
