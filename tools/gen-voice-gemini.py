@@ -135,41 +135,49 @@ def one_clip(job, key):
 
 # ── Batch mode: many words per call, split on silence ─────────────────────────
 
-BATCH_SIZE = 10
-SPLIT_DB = -45.0          # below this is "silence" for segmentation
-MIN_GAP_S = 0.25          # a silence must be at least this long to split on
+BATCH_SIZE = 20           # words per call (phrases use PHRASE_BATCH)
+PHRASE_BATCH = 10
+SPLIT_DB = -45.0          # below this is "silence" for gap detection
+MIN_GAP_S = 0.12          # ignore gaps shorter than this entirely
 MIN_SEG_S = 0.15          # segments shorter than this are noise, not words
 
 
-def split_on_silence(x: np.ndarray, rate: int) -> list[np.ndarray]:
-    """Split audio into voiced segments separated by >= MIN_GAP_S of silence."""
+def split_expected(x: np.ndarray, rate: int, n: int) -> list[np.ndarray]:
+    """Split audio into exactly *n* segments at the n-1 LONGEST silence gaps.
+
+    Robust to short pauses INSIDE an item (phrase punctuation): the transcript
+    separates items with blank lines, so between-item pauses are the longest
+    gaps in the audio. Raises if fewer than n-1 usable gaps exist.
+    """
     thresh = 10 ** (SPLIT_DB / 20)
-    voiced = np.abs(x) > thresh
-    # Close sub-gap holes so intra-word quiet moments don't split a word.
-    gap = int(rate * MIN_GAP_S)
-    segs, start, last_true = [], None, -gap
-    for i in np.flatnonzero(voiced):
-        if start is None:
-            start = i
-        elif i - last_true >= gap:
-            segs.append((start, last_true + 1))
-            start = i
-        last_true = i
-    if start is not None:
-        segs.append((start, last_true + 1))
-    return [x[a:b] for a, b in segs if (b - a) >= rate * MIN_SEG_S]
+    voiced_idx = np.flatnonzero(np.abs(x) > thresh)
+    if not len(voiced_idx):
+        raise ValueError("no voiced audio")
+    # Collect (gap_length, gap_start, gap_end) between consecutive voiced runs.
+    gaps = []
+    diffs = np.diff(voiced_idx)
+    min_gap = int(rate * MIN_GAP_S)
+    for j in np.flatnonzero(diffs > min_gap):
+        a, b = voiced_idx[j], voiced_idx[j + 1]
+        gaps.append((b - a, a + 1, b))
+    if len(gaps) < n - 1:
+        raise ValueError(f"only {len(gaps)} gaps for {n} expected segments")
+    cuts = sorted(g[1] for g in sorted(gaps, reverse=True)[: n - 1])
+    bounds = [voiced_idx[0]] + cuts + [voiced_idx[-1] + 1]
+    segs = [x[bounds[i]:bounds[i + 1]] for i in range(n)]
+    if any(len(s) < rate * MIN_SEG_S for s in segs):
+        raise ValueError("degenerate segment after split")
+    return segs
 
 
 def one_batch(batch_job, key):
-    """One API call for a list of words; returns (batch_job, err)."""
+    """One API call for a list of items; returns (batch_job, err)."""
     voice, entries = batch_job  # entries: [(stem, text, out_path), ...]
     transcript = "\n\n".join(text for _, text, _ in entries)
     try:
         pcm, rate = call_with_backoff(transcript, voice, key)
         raw = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
-        segs = split_on_silence(raw, rate)
-        if len(segs) != len(entries):
-            raise ValueError(f"expected {len(entries)} segments, got {len(segs)}")
+        segs = split_expected(raw, rate, len(entries))
         for (stem, _text, out), seg in zip(entries, segs):
             pcm_seg = (np.clip(seg, -1, 1) * 32767).astype(np.int16).tobytes()
             x = process(pcm_seg, rate)
@@ -215,39 +223,27 @@ def main() -> None:
                     continue
                 pending.append((voice, stem, text, out))
 
+    # Everything is batched — the TTS model's quota is 100 requests/DAY, so
+    # calls are the scarce resource. Items are separated by blank lines in the
+    # transcript and re-split at the n-1 longest silence gaps.
     failed = 0
-    if args.phrases:
-        # Phrases: one per call (their internal punctuation pauses would fool
-        # the silence splitter).
-        print(f"{len(pending)} phrase clips on {MODEL} (one per call)", flush=True)
-        with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-            futures = [pool.submit(one_clip, j, key) for j in pending]
-            for n, fut in enumerate(as_completed(futures), 1):
-                job, err = fut.result()
-                if err:
-                    failed += 1
-                    print(f"  FAIL {job[0]}/{job[3].name}: {err}", flush=True)
-                if n % 10 == 0:
-                    print(f"  {n}/{len(pending)}", flush=True)
-    else:
-        # Words: batch BATCH_SIZE words per call, split the audio on silences.
-        # 10x fewer calls — the TTS preview model is rate-limited (~10 RPM).
-        batches = []
-        by_voice: dict[str, list] = {}
-        for voice, stem, text, out in pending:
-            by_voice.setdefault(voice, []).append((stem, text, out))
-        for voice, entries in by_voice.items():
-            for i in range(0, len(entries), BATCH_SIZE):
-                batches.append((voice, entries[i:i + BATCH_SIZE]))
-        print(f"{len(pending)} word clips in {len(batches)} batched calls on {MODEL}", flush=True)
-        with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-            futures = [pool.submit(one_batch, b, key) for b in batches]
-            for n, fut in enumerate(as_completed(futures), 1):
-                batch_job, err = fut.result()
-                if err:
-                    failed += len(batch_job[1])
-                    print(f"  FAIL {batch_job[0]} [{batch_job[1][0][0]}..]: {err}", flush=True)
-                print(f"  batch {n}/{len(batches)}", flush=True)
+    size = PHRASE_BATCH if args.phrases else BATCH_SIZE
+    batches = []
+    by_voice: dict[str, list] = {}
+    for voice, stem, text, out in pending:
+        by_voice.setdefault(voice, []).append((stem, text, out))
+    for voice, entries in by_voice.items():
+        for i in range(0, len(entries), size):
+            batches.append((voice, entries[i:i + size]))
+    print(f"{len(pending)} clips in {len(batches)} batched calls on {MODEL}", flush=True)
+    with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+        futures = [pool.submit(one_batch, b, key) for b in batches]
+        for n, fut in enumerate(as_completed(futures), 1):
+            batch_job, err = fut.result()
+            if err:
+                failed += len(batch_job[1])
+                print(f"  FAIL {batch_job[0]} [{batch_job[1][0][0]}..]: {err}", flush=True)
+            print(f"  batch {n}/{len(batches)}", flush=True)
     print(f"done: {len(pending) - failed} ok, {failed} failed"
           + (" — rerun to retry failures (existing clips are skipped)" if failed else ""), flush=True)
     if failed:
