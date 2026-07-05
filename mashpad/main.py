@@ -11,11 +11,13 @@ import random
 
 import pygame
 
-from mashpad import config, imagepack, keymap, render
+from mashpad import config, imagepack, keymap, render, settings as settings_mod
 from mashpad.audio import Audio, repo_root
 from mashpad.items import ItemField
+from mashpad.menu import Menu
 from mashpad.ratelimit import TokenBucket
 from mashpad.trail import Trail
+from mashpad.voiceselect import VoiceSelector
 
 # One unseeded RNG for the whole app (colours, shapes, effect choice, positions).
 rng = random.Random()
@@ -42,11 +44,17 @@ def _char_for_event(event) -> str | None:
     return None
 
 
-def _spawn(field: ItemField, spec, pos, now: float, font, audio: Audio, images=None) -> None:
-    """Register an item, build+cache its render surface once, and fire its audio."""
+def _spawn(field: ItemField, spec, pos, now: float, font, audio: Audio,
+           selector: VoiceSelector, letter_case: str, images=None) -> None:
+    """Register an item, build+cache its render surface once, and fire its audio.
+
+    Every allowed spawn advances the voice selector, then plays the clip in the
+    now-current voice (letters honour *letter_case* when their surface is built).
+    """
     item = field.spawn(spec, pos, now)
-    item.surface = render.build_item_surface(spec, font, images)
-    audio.play_for(spec, rng)
+    item.surface = render.build_item_surface(spec, font, images, letter_case=letter_case)
+    selector.on_keystroke()
+    audio.play_for(spec, rng, voice=selector.current())
 
 
 def main(argv=None) -> None:
@@ -108,6 +116,19 @@ def main(argv=None) -> None:
     ]
 
     audio = Audio(muted=args.mute)
+
+    # Grown-up options: load persisted settings, apply master volume, and build
+    # the voice selector from the discovered packs + the saved mode.
+    settings_path = repo_root() / config.SETTINGS_FILE
+    app_settings = settings_mod.load(settings_path)
+    audio.set_master_volume(app_settings.volume / 100.0)
+    selector = VoiceSelector(
+        audio.voices, app_settings.voice_mode, config.CYCLE_EVERY, rng
+    )
+    menu = Menu(app_settings, audio, font_path)
+    # voice_mode as it was when the menu opened — used to detect a rebuild on close.
+    menu_open_voice_mode = app_settings.voice_mode
+
     field = ItemField()
     trail = Trail()
     bucket = TokenBucket(config.BUCKET_CAPACITY, config.BUCKET_REFILL_PER_S)
@@ -123,28 +144,57 @@ def main(argv=None) -> None:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+                continue
 
-            elif event.type == pygame.KEYDOWN:
+            # While the menu is open, ALL events route to it and baby input is
+            # suppressed.  On the close transition, reapply volume and rebuild the
+            # selector if the voice mode changed.
+            if menu.visible:
+                if menu.handle_event(event) == "quit":
+                    running = False
+                if not menu.visible:  # just closed
+                    audio.set_master_volume(app_settings.volume / 100.0)
+                    if app_settings.voice_mode != menu_open_voice_mode:
+                        selector = VoiceSelector(
+                            audio.voices, app_settings.voice_mode,
+                            config.CYCLE_EVERY, rng,
+                        )
+                continue
+
+            if event.type == pygame.KEYDOWN:
                 # Grown-up exit combo: Ctrl+Alt+Q.
                 if (event.key == pygame.K_q
                         and event.mod & pygame.KMOD_CTRL
                         and event.mod & pygame.KMOD_ALT):
                     running = False
                     continue
-                spec = keymap.item_for_key(_char_for_event(event), rng, _extras)
+                # Grown-up options combo: Ctrl+Alt+O.
+                if (event.key == pygame.K_o
+                        and event.mod & pygame.KMOD_CTRL
+                        and event.mod & pygame.KMOD_ALT):
+                    menu_open_voice_mode = app_settings.voice_mode
+                    menu.open()
+                    continue
+                image_weight = config.RACCOON_WEIGHTS[app_settings.raccoon_amount]
+                spec = keymap.item_for_key(
+                    _char_for_event(event), rng, _extras, image_weight=image_weight
+                )
                 if bucket.try_take(now):
                     pos = (rng.uniform(half, width - half),
                            rng.uniform(half, height - half))
-                    _spawn(field, spec, pos, now, font, audio, images)
+                    _spawn(field, spec, pos, now, font, audio, selector,
+                           app_settings.letter_case, images)
 
             elif event.type == pygame.MOUSEMOTION:
                 trail.add(event.pos, now)
 
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 # Click → shape at the cursor, through the SAME rate-limit bucket.
-                spec = keymap.item_for_key(None, rng, _extras)
+                image_weight = config.RACCOON_WEIGHTS[app_settings.raccoon_amount]
+                spec = keymap.item_for_key(None, rng, _extras, image_weight=image_weight)
                 if bucket.try_take(now):
-                    _spawn(field, spec, event.pos, now, font, audio, images)
+                    _spawn(field, spec, event.pos, now, font, audio, selector,
+                           app_settings.letter_case, images)
 
         field.update(now)
         trail.prune(now)
@@ -153,6 +203,7 @@ def main(argv=None) -> None:
         for item in field.items:          # oldest → newest
             render.draw_item(screen, item, now)
         render.draw_trail(screen, trail, now)
+        menu.draw(screen)                 # overlay on top when visible
         pygame.display.flip()
 
         clock.tick(config.FPS)

@@ -29,6 +29,28 @@ python -m mashpad.gen_voice                    # piper (default, see below)
 python -m mashpad.gen_voice --engine espeak    # espeak-ng fallback
 ```
 
+### Voice pack layout
+
+Voice clips live under `sounds/voice/`. Two layouts are supported and can coexist:
+
+```
+sounds/voice/
+├── hello.wav              # flat legacy layout → one anonymous "default" voice
+├── circle.wav
+├── puck/                  # a named voice pack (dir name = voice name)
+│   ├── hello-1.ogg        #   multiple takes per word (-1, -2, -3)
+│   ├── hello-2.ogg        #   a random take is chosen each spawn
+│   └── circle-1.ogg
+└── nova/
+    └── hello-1.ogg
+```
+
+Each pack subdirectory holds `<word>-<take>.ogg` (or `.wav`) files grouped by
+word; a file with no `-<digit>` suffix counts as take 1. Flat `*.wav` files
+directly under `sounds/voice/` form the single **default** voice. The app runs
+fine with zero packs, flat files only, or several packs — the Voice option in the
+menu lists whatever it finds.
+
 ### Piper voice model
 
 The default voice engine is [Piper](https://github.com/rhasspy/piper) using the
@@ -71,12 +93,32 @@ jack. Run `raspi-config` over SSH or before the first reboot.
 | Input | Action |
 |-------|--------|
 | Letter or digit key | Spawn that character |
-| Any other key | Spawn a random shape |
+| Any other key | Spawn a random shape (or image) |
 | Mouse motion | Draw a fading rainbow trail |
 | Mouse click | Spawn a shape at the cursor |
+| **Ctrl+Alt+O** | Open the grown-up options menu |
 | **Ctrl+Alt+Q** | Quit (grown-up escape combo) |
 
 SSH into the Pi is the fallback exit method if the keyboard is inaccessible.
+
+## Options menu
+
+Press **Ctrl+Alt+O** (a combo a baby won't mash) to open a simple, couch-readable
+overlay. The baby's keys are ignored while it's open; the scene keeps animating
+underneath. Navigate with the **arrow keys** (Up/Down to move, Left/Right to
+change a value), press **Enter** on *Quit* to exit the app, and **Esc** (or
+Ctrl+Alt+O again) to close the menu.
+
+| Setting | What it does |
+|---------|--------------|
+| **Voice** | Which voice pack speaks. Steps through each installed pack, then **Random** (a new voice per spawn) and **Cycle** (rotates voices every ~200 spawns). Choosing a specific pack plays a sample word so you can audition it. |
+| **Volume** | Master volume, 0–100 in steps of 10. Voice clips play at this level; sound effects at 70% of it. |
+| **Letters** | Render letters as **ABC** (uppercase) or **abc** (lowercase). |
+| **Raccoons** | How often a non-letter key spawns image art instead of a shape (when images are installed): **Less** (~25%), **Normal** (~50%), **Lots** (~75%). |
+
+Every change is saved immediately (and again on close) to `settings.json` in the
+repo root. That file is device-local and git-ignored — deleting it restores the
+defaults (Random voice, volume 80, uppercase, Normal raccoons).
 
 ## Custom images
 

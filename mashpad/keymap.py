@@ -33,6 +33,7 @@ def item_for_key(
     char_or_none: Optional[str],
     rng: _random.Random,
     extras: "tuple | list" = (),
+    image_weight: float = 0.5,
 ) -> ItemSpec:
     """Return an ItemSpec for the given key character.
 
@@ -46,8 +47,12 @@ def item_for_key(
         Injected Random instance so callers can seed for tests.
     extras:
         Sequence of ImageEntry-like objects (anything with .name and .spoken).
-        Non-alphanumeric input picks uniformly from config.SHAPES + extras.
         Single-char image reskins are excluded by the caller before passing here.
+    image_weight:
+        Probability that a non-alphanumeric spawn is an image (when *extras* is
+        non-empty).  Otherwise a uniform shape is chosen.  The app derives this
+        from config.RACCOON_WEIGHTS[settings.raccoon_amount]; tests pass 0.0
+        (never image) or 1.0 (always image when extras exist).
     """
     color = rng.choice(config.PALETTE)
 
@@ -58,14 +63,12 @@ def item_for_key(
         if c.isdigit() and len(c) == 1:
             return ItemSpec(kind="digit", name=c, color=color)
 
-    # Anything else (None, space, enter, F-keys, etc.) → pick uniformly from
-    # the combined pool of shapes + image extras.  With 8 shapes and N extras,
-    # each entry is equally likely (e.g. 13 extras → extras are ~62% of spawns).
-    pool: list = list(config.SHAPES) + list(extras)
-    pick = rng.choice(pool)
-    if isinstance(pick, str):
-        # Shape name string.
-        return ItemSpec(kind="shape", name=pick, color=color)
-    else:
-        # ImageEntry-like object — carries .name and .spoken.
+    # Anything else (None, space, enter, F-keys, etc.) → an image (weighted) or
+    # a shape.  When extras exist we roll image_weight; on a hit, pick uniformly
+    # from the images, else pick uniformly from config.SHAPES.  With no extras
+    # the roll is skipped entirely (no rng draw consumed) → always a shape.
+    if extras and rng.random() < image_weight:
+        pick = rng.choice(list(extras))
         return ItemSpec(kind="image", name=pick.name, color=color, spoken=pick.spoken)
+    shape = rng.choice(config.SHAPES)
+    return ItemSpec(kind="shape", name=shape, color=color)
