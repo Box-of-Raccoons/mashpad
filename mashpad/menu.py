@@ -12,8 +12,7 @@ import random
 import pygame
 
 import mashpad
-from mashpad import config, settings as settings_mod
-from mashpad.audio import repo_root
+from mashpad import config, paths, settings as settings_mod
 
 # Menu font size (px) — a couch-readable slice of the item glyph font.
 MENU_FONT_PX = 48
@@ -50,7 +49,9 @@ class Menu:
         self._font = pygame.font.Font(str(font_path), MENU_FONT_PX)
         self._small_font = pygame.font.Font(str(font_path), ABOUT_FONT_PX)
         self._rng = random.Random()  # for auditioning sample words
-        self._save_path = repo_root() / config.SETTINGS_FILE
+        # settings.json is writable state → data_dir() (repo root in dev/Pi,
+        # %APPDATA%\mashpad in a frozen Windows build).
+        self._save_path = paths.data_dir() / config.SETTINGS_FILE
         self._visible = False
         self._selected = 0
 

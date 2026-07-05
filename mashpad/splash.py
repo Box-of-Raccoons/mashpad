@@ -11,7 +11,7 @@ import math
 
 import pygame
 
-from mashpad.audio import repo_root
+from mashpad import paths
 
 # Fraction of the screen height the splash image spans.
 SPLASH_HEIGHT_FRAC = 0.55
@@ -26,7 +26,7 @@ class Splash:
     def __init__(self, screen) -> None:
         self._visible = False
         self._base = None
-        path = repo_root() / "assets" / "splash.png"
+        path = paths.app_root() / "assets" / "splash.png"
         try:
             raw = pygame.image.load(str(path)).convert_alpha()
             _, ih = raw.get_size()

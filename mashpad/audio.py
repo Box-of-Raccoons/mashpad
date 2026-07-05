@@ -18,12 +18,17 @@ from pathlib import Path
 
 import pygame
 
-from mashpad import config
+from mashpad import config, paths
 
 
 def repo_root() -> Path:
-    """Repo root = parent of the `mashpad` package dir (not CWD)."""
-    return Path(__file__).resolve().parent.parent
+    """Read-only content root — thin alias for paths.app_root().
+
+    Kept because other modules import `repo_root` from here. Not frozen this is
+    the repo root (parent of the `mashpad` package); frozen it is the bundle
+    dir. See mashpad/paths.py.
+    """
+    return paths.app_root()
 
 
 class Audio:
