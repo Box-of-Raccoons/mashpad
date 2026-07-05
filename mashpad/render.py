@@ -103,13 +103,30 @@ def _draw_shape(surf: "pygame.Surface", name: str, color) -> None:
 # Item surfaces
 # ---------------------------------------------------------------------------
 
-def build_item_surface(spec, font: "pygame.font.Font") -> "pygame.Surface":
+def build_item_surface(
+    spec,
+    font: "pygame.font.Font",
+    images: "dict | None" = None,
+) -> "pygame.Surface":
     """Render an item to a fresh per-pixel-alpha surface. Called ONCE at spawn.
 
     The surface is always ITEM_SIZE_PX square; glyphs/shapes are centred within
     it so draw_item can scale/centre uniformly. `font` is pre-sized by the caller
     (main.py) from config.ITEM_SIZE_PX and reused for every glyph.
+
+    If *images* is provided and contains *spec.name*, that pre-scaled surface is
+    returned as a fresh copy (.copy()) — each item owns its surface because
+    draw_item calls set_alpha on it.  Image lookup takes priority over glyph/shape
+    rendering for ANY kind: dropping ``a.png`` into assets/images/ reskins the
+    letter 'a', and ``circle.png`` would reskin the circle shape.  No tinting is
+    applied — brand art keeps its exact colours.
     """
+    # Image lookup takes priority over glyph/shape rendering for any kind.
+    if images is not None:
+        img_surf = images.get(spec.name)
+        if img_surf is not None:
+            return img_surf.copy()
+
     size = config.ITEM_SIZE_PX
     surf = pygame.Surface((size, size), pygame.SRCALPHA)
 

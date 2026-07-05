@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 from mashpad.audio import repo_root
-from mashpad import config
+from mashpad import config, imagepack
 
 # ── Vocabulary ────────────────────────────────────────────────────────────────
 
@@ -28,6 +28,10 @@ def _vocabulary() -> list[tuple[str, str]]:
     For a single letter or digit, TTS engines pronounce it as the letter/digit
     name ("A", "seven", etc.) when given the bare character — no special markup
     needed.  Shape names are plain words.
+
+    Image spoken words are added after the base vocabulary, deduped: all entries
+    that share the same spoken word (e.g. raccoon1..raccoon13 → "raccoon") produce
+    exactly ONE clip.  The stem written is the spoken word itself.
     """
     pairs: list[tuple[str, str]] = []
     for ch in "abcdefghijklmnopqrstuvwxyz":
@@ -36,6 +40,16 @@ def _vocabulary() -> list[tuple[str, str]]:
         pairs.append((ch, ch))
     for shape in config.SHAPES:          # single source of truth — never hardcoded
         pairs.append((shape, shape))
+
+    # Add distinct spoken words from the image pack, skipping words already in
+    # the vocabulary.  raccoon1..raccoon13 → one clip: raccoon.wav.
+    existing = {stem for stem, _ in pairs}
+    images_dir = repo_root() / "assets" / config.IMAGES_DIR_NAME
+    for entry in imagepack.scan(images_dir):
+        if entry.spoken not in existing:
+            pairs.append((entry.spoken, entry.spoken))
+            existing.add(entry.spoken)
+
     return pairs
 
 
