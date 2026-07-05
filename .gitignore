@@ -12,3 +12,6 @@ tools/stickers/
 tools/package*.json
 # API keys (gen tools read GEMINI_VOICE_KEY from here)
 .env
+packaging/build/
+packaging/dist/
+packaging/out/
