@@ -36,12 +36,12 @@ REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 from mashpad.gen_voice import _vocabulary  # noqa: E402
 
-SITE_ENV = REPO.parent / "boxofraccoons-website" / ".env"
+SITE_ENV = REPO / ".env"
 MODEL = "gemini-2.5-flash-preview-tts"  # validated by ear against 3.1-preview
 TARGET_RATE = 44100
 TRIM_DB = -40.0
-RETRIES = 4
-WORKERS = 3  # TTS preview is ~10 RPM — more workers just churn 429s
+RETRIES = 1  # RPD=100: every attempt counts — never waste one on a hot window
+WORKERS = 1  # single-file, paced
 
 # The approved style prompt (Hardy, 2026-07-05). {text} is one word or phrase;
 # {tag} is the delivery tag: [enthusiasm] for vocabulary, [laughing] for phrases.
@@ -98,10 +98,20 @@ def process(pcm: bytes, rate: int) -> np.ndarray:
     return x
 
 
+LETTER_NAMES = {
+    "a": "ay", "b": "bee", "c": "see", "d": "dee", "e": "ee", "f": "eff",
+    "g": "gee", "h": "aitch", "i": "eye", "j": "jay", "k": "kay", "l": "ell",
+    "m": "em", "n": "en", "o": "oh", "p": "pee", "q": "cue", "r": "are",
+    "s": "ess", "t": "tee", "u": "you", "v": "vee", "w": "double you",
+    "x": "ex", "y": "why", "z": "zee",
+}
+
+
 def spoken_form(stem: str, text: str) -> str:
-    """Single letters render uppercase in the transcript ('A' reads as the letter name)."""
+    """Letters are spelled as their NAME words ('dee') so TTS never reads
+    phonics ('duh'); output stems stay the bare letter."""
     if len(text) == 1 and text.isalpha():
-        return text.upper()
+        return LETTER_NAMES[text.lower()]
     return text
 
 
@@ -170,11 +180,15 @@ def split_expected(x: np.ndarray, rate: int, n: int) -> list[np.ndarray]:
     return segs
 
 
+CALL_SPACING_S = 7.0  # stay under 10 RPM so 429s never happen
+
+
 def one_batch(batch_job, key):
     """One API call for a list of items; returns (batch_job, err)."""
     voice, entries = batch_job  # entries: [(stem, text, out_path), ...]
     transcript = "\n\n".join(text for _, text, _ in entries)
     try:
+        time.sleep(CALL_SPACING_S)
         pcm, rate = call_with_backoff(transcript, voice, key)
         raw = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
         segs = split_expected(raw, rate, len(entries))
@@ -199,7 +213,7 @@ def main() -> None:
     global TAG
     TAG = args.tag or ("laughing" if args.phrases else "enthusiasm")
 
-    key = re.search(r"GEMINI_API_KEY=(\S+)", SITE_ENV.read_text()).group(1)
+    key = re.search(r"GEMINI_VOICE_KEY=(\S+)", SITE_ENV.read_text()).group(1)
 
     if args.phrases:
         catalogue = json.loads(Path(args.phrases).read_text())
@@ -215,8 +229,8 @@ def main() -> None:
     for voice in args.voices:
         out_dir = REPO / "sounds" / "voice" / voice.lower()
         out_dir.mkdir(parents=True, exist_ok=True)
-        for stem, text in items:
-            for take in range(1, takes + 1):
+        for take in range(1, takes + 1):     # take-rounds OUTER: a word never
+            for stem, text in items:          # repeats inside one batched call
                 name = f"{stem}-{take}.ogg" if not args.phrases else f"{stem}.ogg"
                 out = out_dir / name
                 if out.exists() and not args.force:
