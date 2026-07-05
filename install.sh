@@ -35,7 +35,9 @@ if ! apt-get update; then
 fi
 
 echo "[install] Installing system packages..."
-if ! apt-get install -y python3-pygame python3-numpy espeak-ng alsa-utils; then
+# --no-install-recommends: espeak-ng's recommends can pull in speech-dispatcher
+# (sd_espeak-ng), a console screen reader that speaks tty text over the app.
+if ! apt-get install -y --no-install-recommends python3-pygame python3-numpy espeak-ng alsa-utils; then
     echo "[install] ERROR: apt-get failed. Are you running as root (sudo bash install.sh)?"
     exit 1
 fi

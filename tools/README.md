@@ -22,11 +22,11 @@ node generate.mjs book     # one job (overwrites)
 node halo.mjs              # process all raws into stickers
 ```
 
-Shipped mapping (`assets/images/`): raccoon1=wave, raccoon2=heart,
-raccoon3=bubbles, raccoon4=blocks, raccoon5=balloon, raccoon6=peekaboo,
-raccoon7=drum, raccoon8=teddy, raccoon9=crayons, raccoon10=sandwich,
-raccoon11=water, raccoon12=book, raccoon13=sleep. All fold to the spoken word
-"raccoon" (trailing digits are stripped by `mashpad/imagepack.py`).
+Shipped mapping (`assets/images/`, filename = spoken word): hello=wave scene,
+love=heart-hug, bubbles, blocks, balloon, peekaboo, drum, hug=teddy,
+draw=crayons, sandwich, water, book, sleep. ("love" not "heart" — `heart.png`
+would reskin the heart *shape*.) The generate.mjs job names still use the
+scene names (wave, heart, teddy, crayons); rename when copying into assets.
 
 Touching up shipped art in an image editor is fine — they're plain PNGs. If
 edges look dark/jagged in the app after a re-export, the editor probably wrote

@@ -62,6 +62,9 @@ def main(argv=None) -> None:
     parser.add_argument("--mute", action="store_true", help="disable audio")
     args = parser.parse_args(argv)
 
+    # Larger mixer buffer BEFORE pygame.init() (which would otherwise init the
+    # mixer at the 512-sample default — audible crackle/underruns on the Pi).
+    pygame.mixer.pre_init(frequency=44100, size=-16, channels=2, buffer=2048)
     pygame.init()
 
     if args.windowed is not None:
