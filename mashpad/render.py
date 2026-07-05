@@ -107,12 +107,16 @@ def build_item_surface(
     spec,
     font: "pygame.font.Font",
     images: "dict | None" = None,
+    letter_case: str = "upper",
 ) -> "pygame.Surface":
     """Render an item to a fresh per-pixel-alpha surface. Called ONCE at spawn.
 
     The surface is always ITEM_SIZE_PX square; glyphs/shapes are centred within
     it so draw_item can scale/centre uniformly. `font` is pre-sized by the caller
     (main.py) from config.ITEM_SIZE_PX and reused for every glyph.
+
+    *letter_case* ("upper"|"lower") picks the case for letter glyphs; digits are
+    unaffected. It comes from the grown-up Settings.letter_case option.
 
     If *images* is provided and contains *spec.name*, that pre-scaled surface is
     returned as a fresh copy (.copy()) — each item owns its surface because
@@ -131,7 +135,10 @@ def build_item_surface(
     surf = pygame.Surface((size, size), pygame.SRCALPHA)
 
     if spec.kind in ("letter", "digit"):
-        text = spec.name.upper() if spec.kind == "letter" else spec.name
+        if spec.kind == "letter":
+            text = spec.name.lower() if letter_case == "lower" else spec.name.upper()
+        else:
+            text = spec.name
         glyph = font.render(text, True, spec.color)
         surf.blit(glyph, glyph.get_rect(center=(size // 2, size // 2)))
     else:

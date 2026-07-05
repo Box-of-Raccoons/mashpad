@@ -29,7 +29,7 @@ def rng():
 # Purity: none of the pure modules should import pygame
 # ---------------------------------------------------------------------------
 def test_no_pygame_in_modules():
-    """All six pure modules must load without pulling in pygame."""
+    """All pure modules must load without pulling in pygame."""
     import mashpad
     import mashpad.config
     import mashpad.keymap
@@ -37,6 +37,8 @@ def test_no_pygame_in_modules():
     import mashpad.ratelimit
     import mashpad.trail
     import mashpad.imagepack
+    import mashpad.settings
+    import mashpad.voiceselect
     assert "pygame" not in sys.modules, "A pure module imported pygame!"
 
 
@@ -255,3 +257,57 @@ def test_digit_key_ignores_extras(rng):
     spec = item_for_key("7", rng, extras=[extra])
     assert spec.kind == "digit"
     assert spec.name == "7"
+
+
+# ---------------------------------------------------------------------------
+# image_weight — weighted image-vs-shape selection (seeded rng)
+# ---------------------------------------------------------------------------
+
+def test_image_weight_zero_never_image():
+    """image_weight=0 → never an image, always a shape, even with extras."""
+    extras = [_make_entry("raccoon", "raccoon"), _make_entry("wave", "wave")]
+    rng = random.Random(0)
+    for _ in range(300):
+        s = item_for_key(None, rng, extras=extras, image_weight=0.0)
+        assert s.kind == "shape"
+        assert s.name in config.SHAPES
+
+
+def test_image_weight_one_always_image_when_extras():
+    """image_weight=1 → always an image when extras are present."""
+    extras = [_make_entry("raccoon", "raccoon"), _make_entry("wave", "wave")]
+    rng = random.Random(0)
+    for _ in range(300):
+        s = item_for_key(None, rng, extras=extras, image_weight=1.0)
+        assert s.kind == "image"
+        assert s.name in {"raccoon", "wave"}
+
+
+def test_image_weight_no_extras_always_shape():
+    """With no extras, image_weight is irrelevant → always a shape."""
+    rng = random.Random(0)
+    for _ in range(300):
+        s = item_for_key(None, rng, extras=(), image_weight=1.0)
+        assert s.kind == "shape"
+        assert s.name in config.SHAPES
+
+
+def test_image_weight_default_is_mixed():
+    """The default image_weight (0.5) yields both images and shapes."""
+    extra = _make_entry("raccoon", "raccoon")
+    rng = random.Random(0)
+    kinds = {item_for_key(None, rng, extras=[extra]).kind for _ in range(300)}
+    assert kinds == {"shape", "image"}
+
+
+def test_image_weight_all_extras_reachable_at_one():
+    """At image_weight=1 every extra is reachable and picked uniformly."""
+    extras = [
+        _make_entry("raccoon1", "raccoon"),
+        _make_entry("wave", "wave"),
+        _make_entry("star2", "star"),
+    ]
+    rng = random.Random(0)
+    seen = {item_for_key(None, rng, extras=extras, image_weight=1.0).name
+            for _ in range(500)}
+    assert seen == {"raccoon1", "wave", "star2"}

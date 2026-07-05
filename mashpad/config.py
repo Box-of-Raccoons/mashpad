@@ -57,3 +57,12 @@ ITEM_SIZE_PX = 280
 
 # Subdirectory under assets/ that holds custom PNG sticker images.
 IMAGES_DIR_NAME = "images"
+
+# Keystrokes between voice switches when voice_mode == "cycle".
+CYCLE_EVERY = 200
+
+# Probability a non-letter spawn is an image (when images exist), per setting.
+RACCOON_WEIGHTS = {"less": 0.25, "normal": 0.5, "lots": 0.75}
+
+# Filename (under the repo root) where grown-up options persist.
+SETTINGS_FILE = "settings.json"

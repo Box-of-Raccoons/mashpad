@@ -1,0 +1,222 @@
+# mashpad/menu.py — the grown-up options overlay (pygame UI).
+#
+# A keyboard-only overlay state machine. main.py opens it with Ctrl+Alt+O and,
+# while it is visible, routes ALL events here (baby spawning is suppressed). It
+# dims the screen, draws a centred panel, and edits the shared Settings object
+# in place — autosaving on every change and on close. No mouse handling.
+
+from __future__ import annotations
+
+import random
+
+import pygame
+
+from mashpad import config, settings as settings_mod
+from mashpad.audio import repo_root
+
+# Menu font size (px) — a couch-readable slice of the item glyph font.
+MENU_FONT_PX = 48
+
+# Row indices (order the rows are drawn / navigated).
+_ROW_VOICE = 0
+_ROW_VOLUME = 1
+_ROW_LETTERS = 2
+_ROW_RACCOONS = 3
+_ROW_QUIT = 4
+_ROW_COUNT = 5
+
+# Raccoon-amount order for the Less/Normal/Lots stepper.
+_RACCOON_ORDER = ("less", "normal", "lots")
+
+
+class _SampleWord:
+    """Minimal spec stand-in: Audio.play_for only reads .spoken_name."""
+
+    def __init__(self, word: str) -> None:
+        self.spoken_name = word
+
+
+class Menu:
+    """Grown-up options overlay driven entirely by the keyboard."""
+
+    def __init__(self, settings, audio, font_path) -> None:
+        self._settings = settings
+        self._audio = audio
+        self._font = pygame.font.Font(str(font_path), MENU_FONT_PX)
+        self._rng = random.Random()  # for auditioning sample words
+        self._save_path = repo_root() / config.SETTINGS_FILE
+        self._visible = False
+        self._selected = 0
+
+    # ------------------------------------------------------------------ state
+
+    @property
+    def visible(self) -> bool:
+        return self._visible
+
+    def open(self) -> None:
+        self._visible = True
+        self._selected = 0
+
+    def close(self) -> None:
+        self._visible = False
+        self._save()  # persist on close as well as on every change
+
+    # ------------------------------------------------------------------ events
+
+    def handle_event(self, event) -> "str | None":
+        """Handle one event while the menu is open. Returns 'quit' or None."""
+        if event.type != pygame.KEYDOWN:
+            return None
+
+        key = event.key
+        mod = event.mod
+
+        # Close: Esc, or the same Ctrl+Alt+O that opened it.
+        if key == pygame.K_ESCAPE:
+            self.close()
+            return None
+        if key == pygame.K_o and (mod & pygame.KMOD_CTRL) and (mod & pygame.KMOD_ALT):
+            self.close()
+            return None
+
+        if key == pygame.K_UP:
+            self._selected = (self._selected - 1) % _ROW_COUNT
+        elif key == pygame.K_DOWN:
+            self._selected = (self._selected + 1) % _ROW_COUNT
+        elif key == pygame.K_LEFT:
+            self._step(-1)
+        elif key == pygame.K_RIGHT:
+            self._step(+1)
+        elif key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+            if self._selected == _ROW_QUIT:
+                return "quit"
+        return None
+
+    def _step(self, direction: int) -> None:
+        """Apply a left/right change to the currently highlighted row."""
+        row = self._selected
+        if row == _ROW_VOICE:
+            self._step_voice(direction)
+        elif row == _ROW_VOLUME:
+            self._step_volume(direction)
+        elif row == _ROW_LETTERS:
+            self._step_letters()
+        elif row == _ROW_RACCOONS:
+            self._step_raccoons(direction)
+        # Quit row: no left/right value.
+
+    # --------------------------------------------------------------- row logic
+
+    def _voice_options(self):
+        """Ordered Voice-row values: concrete voices, then 'random', 'cycle'."""
+        return list(self._audio.voices) + ["random", "cycle"]
+
+    def _step_voice(self, direction: int) -> None:
+        options = self._voice_options()
+        if not options:
+            return
+        try:
+            idx = options.index(self._settings.voice_mode)
+        except ValueError:
+            idx = 0  # current value isn't an option (e.g. a voice that vanished)
+        idx = (idx + direction) % len(options)
+        value = options[idx]
+        self._settings.voice_mode = value
+        self._save()
+        # Audition a specific voice so grown-ups hear the pack; none for Random/Cycle.
+        if value not in ("random", "cycle"):
+            self._audio.play_for(_SampleWord("hello"), self._rng, voice=value)
+
+    def _step_volume(self, direction: int) -> None:
+        vol = max(0, min(100, self._settings.volume + direction * 10))
+        if vol != self._settings.volume:
+            self._settings.volume = vol
+            self._audio.set_master_volume(vol / 100.0)  # live feedback
+            self._save()
+
+    def _step_letters(self) -> None:
+        # Two-value toggle: left and right both flip it.
+        self._settings.letter_case = (
+            "lower" if self._settings.letter_case == "upper" else "upper"
+        )
+        self._save()
+
+    def _step_raccoons(self, direction: int) -> None:
+        try:
+            idx = _RACCOON_ORDER.index(self._settings.raccoon_amount)
+        except ValueError:
+            idx = 1  # "normal"
+        idx = max(0, min(len(_RACCOON_ORDER) - 1, idx + direction))  # clamp, no wrap
+        self._settings.raccoon_amount = _RACCOON_ORDER[idx]
+        self._save()
+
+    def _save(self) -> None:
+        settings_mod.save(self._settings, self._save_path)
+
+    # ---------------------------------------------------------------- drawing
+
+    def _voice_label(self) -> str:
+        v = self._settings.voice_mode
+        if v == "random":
+            return "Random"
+        if v == "cycle":
+            return "Cycle"
+        return v.title()
+
+    def _rows(self):
+        """(label, value) pairs, in draw order."""
+        return [
+            ("Voice", self._voice_label()),
+            ("Volume", str(self._settings.volume)),
+            ("Letters", "ABC" if self._settings.letter_case == "upper" else "abc"),
+            ("Raccoons", self._settings.raccoon_amount.title()),
+            ("Quit", ""),
+        ]
+
+    def draw(self, screen) -> None:
+        """Draw the dim overlay + panel on top of the running scene."""
+        if not self._visible:
+            return
+        w, h = screen.get_size()
+
+        # Translucent dark overlay over the whole screen.
+        overlay = pygame.Surface((w, h), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 190))
+        screen.blit(overlay, (0, 0))
+
+        rows = self._rows()
+        title_surf = self._font.render("Options", True, (255, 255, 255))
+        line_h = self._font.get_linesize() + 18
+
+        panel_w = int(w * 0.6)
+        panel_h = title_surf.get_height() + 60 + line_h * len(rows) + 40
+        panel_x = (w - panel_w) // 2
+        panel_y = (h - panel_h) // 2
+
+        panel = pygame.Surface((panel_w, panel_h), pygame.SRCALPHA)
+        panel.fill((20, 20, 30, 235))
+        screen.blit(panel, (panel_x, panel_y))
+
+        # Centred title.
+        title_y = panel_y + 30
+        screen.blit(
+            title_surf,
+            title_surf.get_rect(center=(w // 2, title_y + title_surf.get_height() // 2)),
+        )
+
+        pad = 48
+        left_x = panel_x + pad
+        right_x = panel_x + panel_w - pad
+        y = title_y + title_surf.get_height() + 30
+
+        for i, (label, value) in enumerate(rows):
+            highlighted = i == self._selected
+            # Highlighted row → a bright palette colour; others → soft grey.
+            color = config.PALETTE[i % len(config.PALETTE)] if highlighted else (200, 200, 200)
+            label_surf = self._font.render(label, True, color)
+            screen.blit(label_surf, (left_x, y))
+            if value:
+                value_surf = self._font.render(value, True, color)
+                screen.blit(value_surf, value_surf.get_rect(topright=(right_x, y)))
+            y += line_h
