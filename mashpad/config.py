@@ -88,7 +88,7 @@ PHRASE_COOLDOWN_S = 60.0
 PHRASE_CHANCE = 0.5
 
 # Channel volume for non-phrase audio while a phrase clip is speaking.
-PHRASE_DUCK_FACTOR = 0.25
+PHRASE_DUCK_FACTOR = 0.075
 
 # Seconds between a trigger firing and the phrase speaking — the bed ducks
 # during this lead so the phrase opening is never lost in the noise.
