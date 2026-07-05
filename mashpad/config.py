@@ -90,8 +90,18 @@ PHRASE_CHANCE = 0.5
 # Channel volume for non-phrase audio while a phrase clip is speaking.
 PHRASE_DUCK_FACTOR = 0.25
 
-# Extra seconds the duck window stays open after the phrase clip ends.
-PHRASE_DUCK_TAIL_S = 0.25
+# Seconds between a trigger firing and the phrase speaking — the bed ducks
+# during this lead so the phrase opening is never lost in the noise.
+PHRASE_LEAD_S = 0.45
+
+# Seconds the bed takes to fade down to PHRASE_DUCK_FACTOR when a phrase fires.
+PHRASE_DUCK_FADE_DOWN_S = 0.2
+
+# Extra seconds the bed stays ducked after the phrase clip ends.
+PHRASE_DUCK_TAIL_S = 0.35
+
+# Seconds the bed takes to fade back to full volume after the tail.
+PHRASE_DUCK_FADE_UP_S = 0.5
 
 # Uniform-random window (min, max spawns) between "fun" phrase re-arms.
 FUN_EVERY_SPAWNS = (250, 400)

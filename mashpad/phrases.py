@@ -4,7 +4,10 @@
 # the caller; the module never reads the clock. main.py feeds it drops, spawns
 # and cap hits, then calls poll() once per frame; audio.py plays the clip.
 #
-# Triggers (priority high → low): hello > slowdown > screenfull > raccoons > fun.
+# Triggers: hello always wins; the rest take turns — the armed trigger heard
+# least recently fires first (never-heard beats everything), so a busy session
+# can't let slowdown/screenfull starve raccoons. Ties fall back to the order
+# below.
 #   * hello     — the startup splash displaying, or the first spawn after
 #                 HELLO_IDLE_S idle. EXEMPT from the chance flip and the global
 #                 cooldown: it should reliably greet.
@@ -17,7 +20,7 @@ from __future__ import annotations
 
 from mashpad import config
 
-# Priority order used by poll(): the first eligible candidate fires.
+# Tie-break order for candidates that have never fired (hello always first).
 _PRIORITY = ("hello", "slowdown", "screenfull", "raccoons", "fun")
 
 
@@ -86,14 +89,20 @@ class PhraseDirector:
     def poll(self) -> "str | None":
         """Return one trigger to speak, or None. At most one per call.
 
-        Candidates are considered high → low priority. A candidate blocked by a
-        cooldown is skipped (stays armed for later). An eligible non-hello
-        candidate must win a PHRASE_CHANCE coin flip; a lost flip discards that
-        candidacy until it re-arms, and consideration falls through to the next
-        candidate. hello is exempt from both the flip and the global cooldown.
+        hello is considered first and is exempt from the flip and the global
+        cooldown. The remaining armed candidates are considered least-recently-
+        fired first (never-fired first of all, in _PRIORITY order), so variety
+        self-balances. A candidate blocked by a cooldown is skipped (stays
+        armed for later). An eligible candidate must win a PHRASE_CHANCE coin
+        flip; a lost flip discards that candidacy until it re-arms, and
+        consideration falls through to the next candidate.
         """
         now = self._now
-        for trigger in _PRIORITY:
+        order = sorted(
+            (t for t in _PRIORITY if t != "hello"),
+            key=lambda t: (self._last_fired.get(t, float("-inf")), _PRIORITY.index(t)),
+        )
+        for trigger in ("hello", *order):
             if trigger not in self._pending:
                 continue
             # Per-trigger cooldown: 3× the global minimum.

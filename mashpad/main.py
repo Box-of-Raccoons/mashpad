@@ -252,6 +252,7 @@ def main(argv=None) -> None:
 
         field.update(now)
         trail.prune(now)
+        audio.update(now)  # start due phrases + apply the duck envelope
 
         # Reactive phrases: once per frame, when enabled and the menu is closed.
         # The splash does NOT gate polling — hello greets over it at startup;

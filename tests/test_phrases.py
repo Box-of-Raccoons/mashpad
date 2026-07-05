@@ -177,6 +177,22 @@ def test_failed_flip_discards_until_rearm():
 # priority
 # ---------------------------------------------------------------------------
 
+def test_least_recently_fired_beats_fresh_rearm():
+    # screenfull fires once; later BOTH screenfull and raccoons are armed and
+    # past every cooldown. Never-heard raccoons must win the slot even though
+    # screenfull sits higher in the tie-break order.
+    d = PhraseDirector(FakeRNG(), now=0.0)
+    d.note_cap_hit(0.0)
+    assert d.poll() == "screenfull"
+    later = 3 * config.PHRASE_COOLDOWN_S + 1.0   # clear per-trigger cooldown too
+    d.note_cap_hit(later)                         # re-arm screenfull
+    d.note_spawn(later, config.RACCOON_PILE_N)    # arm raccoons
+    assert d.poll() == "raccoons"
+    # next slot (past the global cooldown) goes back to screenfull
+    d.note_drop(later + config.PHRASE_COOLDOWN_S)
+    assert d.poll() == "screenfull"
+
+
 def test_priority_hello_slowdown_screenfull_raccoons_fun():
     # fun threshold 1 so a single spawn arms it; re-draw 999 after.
     d = PhraseDirector(FakeRNG(randints=[1, 999]), now=0.0)
