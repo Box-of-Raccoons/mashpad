@@ -11,11 +11,16 @@ import random
 
 import pygame
 
-from mashpad import config, imagepack, keymap, render, settings as settings_mod
-from mashpad.audio import Audio, repo_root
+from mashpad import (
+    config, imagepack, items, keymap, lockdown as lockdown_mod, paths,
+    render, settings as settings_mod,
+)
+from mashpad.audio import Audio
 from mashpad.items import ItemField
 from mashpad.menu import Menu
+from mashpad.phrases import PhraseDirector
 from mashpad.ratelimit import TokenBucket
+from mashpad.splash import Splash
 from mashpad.trail import Trail
 from mashpad.voiceselect import VoiceSelector
 
@@ -45,16 +50,28 @@ def _char_for_event(event) -> str | None:
 
 
 def _spawn(field: ItemField, spec, pos, now: float, font, audio: Audio,
-           selector: VoiceSelector, letter_case: str, images=None) -> None:
+           selector: VoiceSelector, letter_case: str, director: PhraseDirector,
+           images=None) -> None:
     """Register an item, build+cache its render surface once, and fire its audio.
 
     Every allowed spawn advances the voice selector, then plays the clip in the
     now-current voice (letters honour *letter_case* when their surface is built).
+    Also feeds the phrase director: a cap force-fade (pre-checked here so
+    items.py semantics are untouched) arms 'screenfull', and the spawn itself —
+    with the live image count — drives hello / fun / raccoons.
     """
+    live_before = [i for i in field.items if i.state(now) != items.DEAD]
+    if len(live_before) >= config.MAX_ITEMS:
+        director.note_cap_hit(now)
     item = field.spawn(spec, pos, now)
     item.surface = render.build_item_surface(spec, font, images, letter_case=letter_case)
     selector.on_keystroke()
     audio.play_for(spec, rng, voice=selector.current())
+    raccoons = sum(
+        1 for i in field.items
+        if i.state(now) != items.DEAD and i.spec.kind == "image"
+    )
+    director.note_spawn(now, raccoons)
 
 
 def main(argv=None) -> None:
@@ -68,6 +85,14 @@ def main(argv=None) -> None:
         help="run in a window (default 1280x720); omit for fullscreen",
     )
     parser.add_argument("--mute", action="store_true", help="disable audio")
+    parser.add_argument(
+        "--no-lockdown",
+        action="store_true",
+        help=(
+            "don't install the Windows keyboard lockdown "
+            "(Win key / Alt-Tab / Alt-F4 / Alt-Esc / Ctrl-Esc stay live)"
+        ),
+    )
     args = parser.parse_args(argv)
 
     # Larger mixer buffer BEFORE pygame.init() (which would otherwise init the
@@ -85,7 +110,16 @@ def main(argv=None) -> None:
         pygame.mouse.set_visible(False)
     pygame.display.set_caption("mashpad")
 
-    font_path = repo_root() / "assets" / "DejaVuSans-Bold.ttf"
+    # Windows keyboard lockdown: in fullscreen, swallow the OS escape combos a
+    # baby could hit (Win key, Alt-Tab, Alt-F4, Alt-Esc, Ctrl-Esc) at the OS
+    # level. A silent no-op off Windows, when --windowed, or when --no-lockdown.
+    # Ctrl+Alt+Del is reserved by the OS and is never affected. Torn down before
+    # pygame.quit() at shutdown.
+    lock = lockdown_mod.Lockdown()
+    if args.windowed is None and not args.no_lockdown:
+        lock.start()
+
+    font_path = paths.app_root() / "assets" / "DejaVuSans-Bold.ttf"
     # Sized once from ITEM_SIZE_PX; reused for every glyph (never re-created).
     font = pygame.font.Font(str(font_path), int(config.ITEM_SIZE_PX * 0.9))
 
@@ -93,7 +127,7 @@ def main(argv=None) -> None:
     # PNG once at startup.  A corrupt or unloadable file prints one warning and is
     # skipped — the app must not crash on a bad image.
     _image_entries = imagepack.scan(
-        repo_root() / "assets" / config.IMAGES_DIR_NAME
+        paths.app_root() / "assets" / config.IMAGES_DIR_NAME
     )
     images: dict[str, pygame.Surface] = {}
     for _entry in _image_entries:
@@ -119,11 +153,16 @@ def main(argv=None) -> None:
 
     # Grown-up options: load persisted settings, apply master volume, and build
     # the voice selector from the discovered packs + the saved mode.
-    settings_path = repo_root() / config.SETTINGS_FILE
+    settings_path = paths.data_dir() / config.SETTINGS_FILE
     app_settings = settings_mod.load(settings_path)
     audio.set_master_volume(app_settings.volume / 100.0)
+    # Gender per discovered pack (unknown packs → None) for cycle alternation.
+    genders = {
+        name: config.VOICE_INFO.get(name, (name.title(), None))[1]
+        for name in audio.voices
+    }
     selector = VoiceSelector(
-        audio.voices, app_settings.voice_mode, config.CYCLE_EVERY, rng
+        audio.voices, app_settings.voice_mode, genders, rng
     )
     menu = Menu(app_settings, audio, font_path)
     # voice_mode as it was when the menu opened — used to detect a rebuild on close.
@@ -132,6 +171,8 @@ def main(argv=None) -> None:
     field = ItemField()
     trail = Trail()
     bucket = TokenBucket(config.BUCKET_CAPACITY, config.BUCKET_REFILL_PER_S)
+    splash = Splash(screen)
+    director = PhraseDirector(rng, pygame.time.get_ticks() / 1000.0)
     clock = pygame.time.Clock()
 
     width, height = screen.get_size()
@@ -156,10 +197,17 @@ def main(argv=None) -> None:
                     audio.set_master_volume(app_settings.volume / 100.0)
                     if app_settings.voice_mode != menu_open_voice_mode:
                         selector = VoiceSelector(
-                            audio.voices, app_settings.voice_mode,
-                            config.CYCLE_EVERY, rng,
+                            audio.voices, app_settings.voice_mode, genders, rng,
                         )
                 continue
+
+            # Splash: the first key press / click dismisses it, then the very
+            # same event is processed normally below — the dismissing smash still
+            # spawns its item (and grown-up combos still do their thing).
+            if splash.visible and event.type in (
+                pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN
+            ):
+                splash.dismiss()
 
             if event.type == pygame.KEYDOWN:
                 # Grown-up exit combo: Ctrl+Alt+Q.
@@ -183,7 +231,9 @@ def main(argv=None) -> None:
                     pos = (rng.uniform(half, width - half),
                            rng.uniform(half, height - half))
                     _spawn(field, spec, pos, now, font, audio, selector,
-                           app_settings.letter_case, images)
+                           app_settings.letter_case, director, images)
+                else:
+                    director.note_drop(now)
 
             elif event.type == pygame.MOUSEMOTION:
                 trail.add(event.pos, now)
@@ -194,18 +244,31 @@ def main(argv=None) -> None:
                 spec = keymap.item_for_key(None, rng, _extras, image_weight=image_weight)
                 if bucket.try_take(now):
                     _spawn(field, spec, event.pos, now, font, audio, selector,
-                           app_settings.letter_case, images)
+                           app_settings.letter_case, director, images)
+                else:
+                    director.note_drop(now)
 
         field.update(now)
         trail.prune(now)
+
+        # Reactive phrases: once per frame, when enabled and no overlay is up.
+        # Rotate the voice first (cycle mode) so the comment speaks in the new
+        # voice, then play the phrase clip.
+        if app_settings.phrases and not menu.visible and not splash.visible:
+            trigger = director.poll()
+            if trigger is not None:
+                selector.on_trigger()
+                audio.play_phrase(trigger, rng, selector.current())
 
         screen.fill(render.BACKGROUND)
         for item in field.items:          # oldest → newest
             render.draw_item(screen, item, now)
         render.draw_trail(screen, trail, now)
         menu.draw(screen)                 # overlay on top when visible
+        splash.draw(screen, now)          # startup splash, above everything
         pygame.display.flip()
 
         clock.tick(config.FPS)
 
+    lock.stop()  # remove the keyboard hook (no-op if it was never installed)
     pygame.quit()

@@ -30,6 +30,8 @@ class Settings:
     letter_case: str = "upper"
     # "less" | "normal" | "lots" — how often non-letter keys spawn image art.
     raccoon_amount: str = "normal"
+    # Whether the app occasionally speaks a reactive phrase (e.g. "slow down!").
+    phrases: bool = True
 
 
 def _from_dict(raw: dict) -> Settings:
@@ -58,6 +60,11 @@ def _from_dict(raw: dict) -> Settings:
     if ra in RACCOON_AMOUNTS:
         s.raccoon_amount = ra
 
+    ph = raw.get("phrases")
+    # Strict bool only — reject ints/strings (JSON true/false decode to bool).
+    if isinstance(ph, bool):
+        s.phrases = ph
+
     return s
 
 
@@ -84,6 +91,7 @@ def save(settings: Settings, path: Path) -> None:
         "volume": settings.volume,
         "letter_case": settings.letter_case,
         "raccoon_amount": settings.raccoon_amount,
+        "phrases": settings.phrases,
     }
     tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
     tmp.replace(path)  # atomic on the same filesystem

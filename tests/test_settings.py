@@ -16,6 +16,7 @@ def test_defaults():
     assert s.volume == 80
     assert s.letter_case == "upper"
     assert s.raccoon_amount == "normal"
+    assert s.phrases is True
 
 
 # ---------------------------------------------------------------------------
@@ -44,16 +45,19 @@ def test_non_dict_json_returns_defaults(tmp_path):
 
 def test_roundtrip(tmp_path):
     p = tmp_path / "settings.json"
-    s = Settings(voice_mode="puck", volume=50, letter_case="lower", raccoon_amount="lots")
+    s = Settings(voice_mode="puck", volume=50, letter_case="lower",
+                 raccoon_amount="lots", phrases=False)
     save(s, p)
     assert load(p) == s
 
 
-def test_save_writes_four_keys(tmp_path):
+def test_save_writes_all_keys(tmp_path):
     p = tmp_path / "settings.json"
     save(Settings(), p)
     data = json.loads(p.read_text(encoding="utf-8"))
-    assert set(data) == {"voice_mode", "volume", "letter_case", "raccoon_amount"}
+    assert set(data) == {
+        "voice_mode", "volume", "letter_case", "raccoon_amount", "phrases"
+    }
 
 
 def test_save_atomic_leaves_no_tmp(tmp_path):
@@ -113,6 +117,27 @@ def test_empty_dict_gives_defaults(tmp_path):
     p = tmp_path / "settings.json"
     p.write_text("{}", encoding="utf-8")
     assert load(p) == Settings()
+
+
+# ---------------------------------------------------------------------------
+# phrases — strict bool
+# ---------------------------------------------------------------------------
+
+def test_phrases_bool_accepted(tmp_path):
+    p = tmp_path / "settings.json"
+    p.write_text(json.dumps({"phrases": False}), encoding="utf-8")
+    assert load(p).phrases is False
+    p.write_text(json.dumps({"phrases": True}), encoding="utf-8")
+    assert load(p).phrases is True
+
+
+def test_phrases_non_bool_rejected(tmp_path):
+    # Non-bool values (int, string) fall back to the default True.
+    p = tmp_path / "settings.json"
+    p.write_text(json.dumps({"phrases": 0}), encoding="utf-8")
+    assert load(p).phrases is True
+    p.write_text(json.dumps({"phrases": "off"}), encoding="utf-8")
+    assert load(p).phrases is True
 
 
 # ---------------------------------------------------------------------------

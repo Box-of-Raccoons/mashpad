@@ -88,6 +88,37 @@ By default, audio routes to whichever output is active in `raspi-config`:
 **Advanced Options → Audio** — choose between HDMI and the 3.5 mm headphone
 jack. Run `raspi-config` over SSH or before the first reboot.
 
+## Desktop (Windows)
+
+mashpad also ships as a standalone Windows app (a frozen PyInstaller build — see
+the packaging notes). When it runs **fullscreen** it installs an OS-level
+keyboard lockdown so a baby can't escape or close the app by mashing system
+combos. It swallows:
+
+| Combo | Normally does |
+|-------|---------------|
+| **Windows key** (left/right) | Opens the Start menu |
+| **Alt+Tab** | Switches windows |
+| **Alt+F4** | Closes the app |
+| **Alt+Esc** | Cycles windows |
+| **Ctrl+Esc** | Opens the Start menu |
+
+It **cannot** intercept **Ctrl+Alt+Del** — that's a Secure Attention Sequence
+the OS reserves, and no application (this one included) can trap it. That's your
+guaranteed way out if you ever need it.
+
+The grown-up combos still work as always: **Ctrl+Alt+O** opens the options menu
+and **Ctrl+Alt+Q** quits the app.
+
+The lockdown is active only in fullscreen. Windowed runs (`--windowed`) never
+hook, and you can force it off in fullscreen with **`--no-lockdown`**. It is a
+silent no-op on Raspberry Pi / Linux — that platform is unaffected.
+
+In the installed Windows app, settings are saved to
+**`%APPDATA%\mashpad\settings.json`** (not next to the read-only program files).
+Deleting that file restores the defaults. Running from a source checkout (dev +
+Pi) still keeps `settings.json` in the repo root as before.
+
 ## Controls
 
 | Input | Action |
@@ -111,14 +142,43 @@ Ctrl+Alt+O again) to close the menu.
 
 | Setting | What it does |
 |---------|--------------|
-| **Voice** | Which voice pack speaks. Steps through each installed pack, then **Random** (a new voice per spawn) and **Cycle** (rotates voices every ~200 spawns). Choosing a specific pack plays a sample word so you can audition it. |
+| **Voice** | Which voice pack speaks. Steps through each installed pack (shown as friendly labels like *Voice 1*), then **Random** (a new voice per spawn) and **Cycle** (the voice changes when the app comments, alternating male/female). Choosing a specific pack plays a sample word so you can audition it. |
 | **Volume** | Master volume, 0–100 in steps of 10. Voice clips play at this level; sound effects at 70% of it. |
 | **Letters** | Render letters as **ABC** (uppercase) or **abc** (lowercase). |
 | **Raccoons** | How often a non-letter key spawns image art instead of a shape (when images are installed): **Less** (~25%), **Normal** (~50%), **Lots** (~75%). |
+| **Phrases** | **On/Off** — whether the app occasionally speaks a short reactive comment (see [Reactive phrases](#reactive-phrases)). |
 
 Every change is saved immediately (and again on close) to `settings.json` in the
 repo root. That file is device-local and git-ignored — deleting it restores the
 defaults (Random voice, volume 80, uppercase, Normal raccoons).
+
+## Splash screen
+
+On launch, mashpad shows a centred splash image (`assets/splash.png`) with a
+gentle breathing pulse over the running scene. The **first** key press or mouse
+click dismisses it — and that same smash still spawns its item, so the baby's
+first bash pays off immediately. If the splash image is missing or unreadable,
+the app simply starts without it.
+
+## Reactive phrases
+
+Now and then the app speaks a short, friendly comment in the current voice
+(toggle with **Phrases** in the options menu). Phrases are rate-limited — at most
+one every 60 seconds, and each kind has its own longer cooldown — so they stay a
+treat, not a nag. In **Cycle** voice mode, the voice rotates to a new speaker
+(alternating male/female) each time a phrase plays. Five things can prompt one:
+
+| Trigger | When it fires |
+|---------|---------------|
+| **hello** | The first spawn after launch, and again after a long idle gap — a reliable greeting (this one ignores the cooldown). |
+| **slowdown** | A burst of very fast mashing (many key presses dropped by the rate limiter in a few seconds). |
+| **screenfull** | The screen fills up and the oldest item is pushed off to make room. |
+| **raccoons** | A pile of image "raccoon" stickers are on screen at once. |
+| **fun** | Occasionally, after a few hundred spawns — just for fun. |
+
+Phrase clips live in each voice pack as `phrase-<trigger>-<n>.ogg` (e.g.
+`phrase-slowdown-3.ogg`) and are kept separate from spoken words, so they are
+never picked as a letter/shape name.
 
 ## Custom images
 
@@ -147,6 +207,14 @@ Images are loaded once at startup, scaled to fit within the item size
 (`ITEM_SIZE_PX × ITEM_SIZE_PX` in `config.py`) while preserving aspect ratio.
 Transparency (PNG alpha) is preserved. Corrupt or unloadable files are skipped
 with a warning — the app will not crash.
+
+## Versioning
+
+The version lives in `mashpad/__init__.py` (`__version__`) and is shown in the
+options-menu About footer. Development builds carry a Maven-style `-SNAPSHOT`
+suffix naming the *next* release (e.g. `1.0.0-SNAPSHOT`); cutting a release
+strips the suffix (`1.0.0`) on `main`, and the next development cycle bumps to
+the following `-SNAPSHOT`.
 
 ## Font license
 

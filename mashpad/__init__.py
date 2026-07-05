@@ -5,4 +5,4 @@ import os
 # tty1 and gets spoken aloud if a console screen reader is active.
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 
-__version__ = "0.2.0"
+__version__ = "1.0.0-SNAPSHOT"

@@ -11,19 +11,23 @@ import random
 
 import pygame
 
-from mashpad import config, settings as settings_mod
-from mashpad.audio import repo_root
+import mashpad
+from mashpad import config, paths, settings as settings_mod
 
 # Menu font size (px) — a couch-readable slice of the item glyph font.
 MENU_FONT_PX = 48
+
+# About-footer font size (px) — small, quiet credit line at the panel bottom.
+ABOUT_FONT_PX = 24
 
 # Row indices (order the rows are drawn / navigated).
 _ROW_VOICE = 0
 _ROW_VOLUME = 1
 _ROW_LETTERS = 2
 _ROW_RACCOONS = 3
-_ROW_QUIT = 4
-_ROW_COUNT = 5
+_ROW_PHRASES = 4
+_ROW_QUIT = 5
+_ROW_COUNT = 6
 
 # Raccoon-amount order for the Less/Normal/Lots stepper.
 _RACCOON_ORDER = ("less", "normal", "lots")
@@ -43,8 +47,11 @@ class Menu:
         self._settings = settings
         self._audio = audio
         self._font = pygame.font.Font(str(font_path), MENU_FONT_PX)
+        self._small_font = pygame.font.Font(str(font_path), ABOUT_FONT_PX)
         self._rng = random.Random()  # for auditioning sample words
-        self._save_path = repo_root() / config.SETTINGS_FILE
+        # settings.json is writable state → data_dir() (repo root in dev/Pi,
+        # %APPDATA%\mashpad in a frozen Windows build).
+        self._save_path = paths.data_dir() / config.SETTINGS_FILE
         self._visible = False
         self._selected = 0
 
@@ -104,6 +111,8 @@ class Menu:
             self._step_letters()
         elif row == _ROW_RACCOONS:
             self._step_raccoons(direction)
+        elif row == _ROW_PHRASES:
+            self._step_phrases()
         # Quit row: no left/right value.
 
     # --------------------------------------------------------------- row logic
@@ -151,6 +160,11 @@ class Menu:
         self._settings.raccoon_amount = _RACCOON_ORDER[idx]
         self._save()
 
+    def _step_phrases(self) -> None:
+        # Two-value toggle: left and right both flip it.
+        self._settings.phrases = not self._settings.phrases
+        self._save()
+
     def _save(self) -> None:
         settings_mod.save(self._settings, self._save_path)
 
@@ -162,7 +176,8 @@ class Menu:
             return "Random"
         if v == "cycle":
             return "Cycle"
-        return v.title()
+        # Friendly label for a known pack; unknown packs fall back to name.title().
+        return config.VOICE_INFO.get(v, (v.title(), None))[0]
 
     def _rows(self):
         """(label, value) pairs, in draw order."""
@@ -171,6 +186,7 @@ class Menu:
             ("Volume", str(self._settings.volume)),
             ("Letters", "ABC" if self._settings.letter_case == "upper" else "abc"),
             ("Raccoons", self._settings.raccoon_amount.title()),
+            ("Phrases", "On" if self._settings.phrases else "Off"),
             ("Quit", ""),
         ]
 
@@ -189,8 +205,12 @@ class Menu:
         title_surf = self._font.render("Options", True, (255, 255, 255))
         line_h = self._font.get_linesize() + 18
 
+        # About footer occupies two small lines + padding at the panel bottom.
+        foot_line_h = self._small_font.get_linesize()
+        footer_h = foot_line_h * 2 + 24
+
         panel_w = int(w * 0.6)
-        panel_h = title_surf.get_height() + 60 + line_h * len(rows) + 40
+        panel_h = title_surf.get_height() + 60 + line_h * len(rows) + 40 + footer_h
         panel_x = (w - panel_w) // 2
         panel_y = (h - panel_h) // 2
 
@@ -220,3 +240,16 @@ class Menu:
                 value_surf = self._font.render(value, True, color)
                 screen.blit(value_surf, value_surf.get_rect(topright=(right_x, y)))
             y += line_h
+
+        # About footer: two quiet centred lines at the bottom of the panel.
+        foot_grey = (140, 140, 150)
+        foot_top = panel_y + panel_h - 16 - foot_line_h * 2
+        line1 = self._small_font.render(f"mashpad v{mashpad.__version__}", True, foot_grey)
+        line2 = self._small_font.render(
+            f"{config.COMPANY}, {config.BUILD_YEAR}", True, foot_grey
+        )
+        screen.blit(line1, line1.get_rect(center=(w // 2, foot_top + foot_line_h // 2)))
+        screen.blit(
+            line2,
+            line2.get_rect(center=(w // 2, foot_top + foot_line_h + foot_line_h // 2)),
+        )
