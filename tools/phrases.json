@@ -1,0 +1,37 @@
+{
+  "slowdown": [
+    "Haha, slow down!",
+    "Whoa, so fast!",
+    "Let's be nice to the keyboard!",
+    "Those are some fast fingers!",
+    "One at a time, silly goose!"
+  ],
+  "fun": [
+    "You seem like you're having fun!",
+    "Wow, great job!",
+    "This is so much fun!",
+    "Look at you go!",
+    "You're doing amazing!"
+  ],
+  "raccoons": [
+    "Look at all the fun raccoons!",
+    "The raccoons love you!",
+    "So many raccoons!",
+    "It's a raccoon party!",
+    "You must really love raccoons!"
+  ],
+  "hello": [
+    "Hi there! Let's play!",
+    "Hello! Ready to play?",
+    "Welcome back!",
+    "Hi friend!",
+    "Let's play with letters!"
+  ],
+  "screenfull": [
+    "Wow, look at all of those!",
+    "The screen is SO full!",
+    "Amazing! Look at everything!",
+    "It's getting busy in here!",
+    "You filled the whole screen!"
+  ]
+}
