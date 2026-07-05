@@ -1,0 +1,8 @@
+# Development / test dependencies.
+# On Raspberry Pi, install pygame and numpy from apt instead of pip:
+#   sudo apt install python3-pygame python3-numpy
+# Then pip-install only the remaining packages from this file.
+
+pytest>=7.4
+pygame>=2.5     # runtime dep; on Pi use apt python3-pygame
+numpy>=1.24     # used by gen_effects.py; on Pi use apt python3-numpy

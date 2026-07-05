@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+# Generated at install time by gen_voice.py / gen_effects.py — never committed.
+sounds/voice/*.wav
+sounds/effects/*.wav
