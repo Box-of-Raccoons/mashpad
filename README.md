@@ -78,6 +78,34 @@ jack. Run `raspi-config` over SSH or before the first reboot.
 
 SSH into the Pi is the fallback exit method if the keyboard is inaccessible.
 
+## Custom images
+
+Drop PNG files into `assets/images/` to add sticker art (raccoon stickers,
+custom shapes, etc.) that spawns when the baby smashes non-alphanumeric keys.
+
+**Naming rules:**
+
+- Trailing digits are stripped to form the spoken word: `raccoon1.png`,
+  `raccoon2.png`, … all share one voice clip, `raccoon.wav`.
+- Names without trailing digits use the full stem: `wave.png` → "wave".
+- Single-character names (e.g. `a.png`, `7.png`) reskin that letter or digit
+  key — they appear only when that key is pressed, and are not added to the
+  random-spawn pool.
+- All other names become pool members: non-alphanumeric key presses and mouse
+  clicks pick uniformly from the combined shapes + image pool.
+
+**After adding images**, regenerate voice clips so the new spoken words are
+available:
+
+```sh
+python -m mashpad.gen_voice   # or --engine espeak
+```
+
+Images are loaded once at startup, scaled to fit within the item size
+(`ITEM_SIZE_PX × ITEM_SIZE_PX` in `config.py`) while preserving aspect ratio.
+Transparency (PNG alpha) is preserved. Corrupt or unloadable files are skipped
+with a warning — the app will not crash.
+
 ## Font license
 
 `assets/DejaVuSans-Bold.ttf` is from the [DejaVu Fonts](https://dejavu-fonts.github.io/)

@@ -4,3 +4,7 @@ __pycache__/
 # Generated at install time by gen_voice.py / gen_effects.py — never committed.
 sounds/voice/*.wav
 sounds/effects/*.wav
+tools/node_modules/
+tools/raw/
+tools/stickers/
+tools/package*.json

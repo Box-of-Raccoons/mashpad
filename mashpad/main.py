@@ -11,7 +11,7 @@ import random
 
 import pygame
 
-from mashpad import config, keymap, render
+from mashpad import config, imagepack, keymap, render
 from mashpad.audio import Audio, repo_root
 from mashpad.items import ItemField
 from mashpad.ratelimit import TokenBucket
@@ -42,10 +42,10 @@ def _char_for_event(event) -> str | None:
     return None
 
 
-def _spawn(field: ItemField, spec, pos, now: float, font, audio: Audio) -> None:
+def _spawn(field: ItemField, spec, pos, now: float, font, audio: Audio, images=None) -> None:
     """Register an item, build+cache its render surface once, and fire its audio."""
     item = field.spawn(spec, pos, now)
-    item.surface = render.build_item_surface(spec, font)
+    item.surface = render.build_item_surface(spec, font, images)
     audio.play_for(spec, rng)
 
 
@@ -78,6 +78,32 @@ def main(argv=None) -> None:
     # Sized once from ITEM_SIZE_PX; reused for every glyph (never re-created).
     font = pygame.font.Font(str(font_path), int(config.ITEM_SIZE_PX * 0.9))
 
+    # Load the image pack.  Scan first (pure, no pygame), then load + scale each
+    # PNG once at startup.  A corrupt or unloadable file prints one warning and is
+    # skipped — the app must not crash on a bad image.
+    _image_entries = imagepack.scan(
+        repo_root() / "assets" / config.IMAGES_DIR_NAME
+    )
+    images: dict[str, pygame.Surface] = {}
+    for _entry in _image_entries:
+        try:
+            _raw = pygame.image.load(str(_entry.path)).convert_alpha()
+            # Scale to fit within ITEM_SIZE_PX × ITEM_SIZE_PX preserving aspect ratio.
+            _w, _h = _raw.get_size()
+            _scale = min(config.ITEM_SIZE_PX / _w, config.ITEM_SIZE_PX / _h)
+            _nw = max(1, int(round(_w * _scale)))
+            _nh = max(1, int(round(_h * _scale)))
+            images[_entry.name] = pygame.transform.smoothscale(_raw, (_nw, _nh))
+        except Exception as exc:  # noqa: BLE001 — skip bad image, never crash
+            print(f"[mashpad images] could not load {_entry.path.name}: {exc}")
+
+    # Extras: pool members for non-alphanumeric key spawns.  Single-char names
+    # (e.g. "a.png", "7.png") are reskins only — exclude them from the pool.
+    _extras = [
+        e for e in _image_entries
+        if not (len(e.name) == 1 and e.name.isalnum())
+    ]
+
     audio = Audio(muted=args.mute)
     field = ItemField()
     trail = Trail()
@@ -102,20 +128,20 @@ def main(argv=None) -> None:
                         and event.mod & pygame.KMOD_ALT):
                     running = False
                     continue
-                spec = keymap.item_for_key(_char_for_event(event), rng)
+                spec = keymap.item_for_key(_char_for_event(event), rng, _extras)
                 if bucket.try_take(now):
                     pos = (rng.uniform(half, width - half),
                            rng.uniform(half, height - half))
-                    _spawn(field, spec, pos, now, font, audio)
+                    _spawn(field, spec, pos, now, font, audio, images)
 
             elif event.type == pygame.MOUSEMOTION:
                 trail.add(event.pos, now)
 
             elif event.type == pygame.MOUSEBUTTONDOWN:
                 # Click → shape at the cursor, through the SAME rate-limit bucket.
-                spec = keymap.item_for_key(None, rng)
+                spec = keymap.item_for_key(None, rng, _extras)
                 if bucket.try_take(now):
-                    _spawn(field, spec, event.pos, now, font, audio)
+                    _spawn(field, spec, event.pos, now, font, audio, images)
 
         field.update(now)
         trail.prune(now)

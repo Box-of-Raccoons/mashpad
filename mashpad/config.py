@@ -54,3 +54,6 @@ MIXER_CHANNELS = 8
 
 # Rendered size (diameter / side) of each item in pixels at scale=1.0.
 ITEM_SIZE_PX = 280
+
+# Subdirectory under assets/ that holds custom PNG sticker images.
+IMAGES_DIR_NAME = "images"

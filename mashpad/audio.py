@@ -63,10 +63,10 @@ class Audio:
         return result_map if as_map else result_list
 
     def play_for(self, spec, rng) -> None:
-        """Play the voice clip for spec.name (if loaded) plus a random effect (if any)."""
+        """Play the voice clip for spec.spoken_name (if loaded) plus a random effect."""
         if not self._ok:
             return
-        clip = self._voice.get(spec.name)
+        clip = self._voice.get(spec.spoken_name)
         if clip is not None:
             self._play(clip)
         if self._effects:
