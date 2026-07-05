@@ -56,6 +56,10 @@ class Audio:
         try:
             pygame.mixer.init()
             pygame.mixer.set_num_channels(config.MIXER_CHANNELS)
+            # Channel 0 is reserved for phrases: find_channel() never hands it
+            # out, so a mash burst can't starve a firing phrase of a channel.
+            pygame.mixer.set_reserved(1)
+            self._phrase_channel = pygame.mixer.Channel(0)
         except Exception as exc:  # noqa: BLE001 — any mixer failure → silent mode
             print(f"[mashpad audio] mixer init failed ({exc}); running silent")
             return
@@ -123,9 +127,10 @@ class Audio:
         if clip is None:
             return
         clip.set_volume(self._master)
-        channel = self._play(clip)
-        if channel is None:
-            return
+        # Phrases play on the reserved channel — never dropped when the bed has
+        # every open channel busy; a new phrase interrupts the previous one.
+        channel = self._phrase_channel
+        channel.play(clip)
         # Duck every busy channel, then restore the phrase's own to full volume
         # last — Channel(i) wrappers don't compare by underlying channel, so
         # "duck all, then un-duck ours" is the only reliable order.
