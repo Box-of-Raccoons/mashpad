@@ -173,6 +173,8 @@ def main(argv=None) -> None:
     bucket = TokenBucket(config.BUCKET_CAPACITY, config.BUCKET_REFILL_PER_S)
     splash = Splash(screen)
     director = PhraseDirector(rng, pygame.time.get_ticks() / 1000.0)
+    if splash.visible:
+        director.note_splash(pygame.time.get_ticks() / 1000.0)
     clock = pygame.time.Clock()
 
     width, height = screen.get_size()
@@ -251,10 +253,11 @@ def main(argv=None) -> None:
         field.update(now)
         trail.prune(now)
 
-        # Reactive phrases: once per frame, when enabled and no overlay is up.
-        # Rotate the voice first (cycle mode) so the comment speaks in the new
-        # voice, then play the phrase clip.
-        if app_settings.phrases and not menu.visible and not splash.visible:
+        # Reactive phrases: once per frame, when enabled and the menu is closed.
+        # The splash does NOT gate polling — hello greets over it at startup;
+        # nothing else can be armed before the first input dismisses it. Rotate
+        # the voice first (cycle mode) so the comment speaks in the new voice.
+        if app_settings.phrases and not menu.visible:
             trigger = director.poll()
             if trigger is not None:
                 selector.on_trigger()

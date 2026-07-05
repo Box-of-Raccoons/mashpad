@@ -5,9 +5,9 @@
 # and cap hits, then calls poll() once per frame; audio.py plays the clip.
 #
 # Triggers (priority high → low): hello > slowdown > screenfull > raccoons > fun.
-#   * hello     — first spawn ever, or the first spawn after HELLO_IDLE_S idle.
-#                 EXEMPT from the chance flip and the global cooldown: it should
-#                 reliably greet.
+#   * hello     — the startup splash displaying, or the first spawn after
+#                 HELLO_IDLE_S idle. EXEMPT from the chance flip and the global
+#                 cooldown: it should reliably greet.
 #   * slowdown  — SLOWDOWN_DROPS rate-limiter drops within SLOWDOWN_WINDOW_S.
 #   * screenfull— the item field force-faded because the MAX_ITEMS cap was hit.
 #   * raccoons  — RACCOON_PILE_N or more image items live on screen.
@@ -35,8 +35,7 @@ class PhraseDirector:
         # fun: spawn counter + the random threshold it must pass to arm.
         self._spawn_count = 0
         self._fun_threshold = self._draw_fun()
-        # hello: has anything spawned yet, and when did the last spawn happen.
-        self._first_spawn_done = False
+        # hello: when did the last spawn happen (drives the idle re-greet).
         self._last_spawn_time = None
 
     def _draw_fun(self) -> int:
@@ -54,16 +53,18 @@ class PhraseDirector:
         if len(self._drop_times) >= config.SLOWDOWN_DROPS:
             self._pending.add("slowdown")
 
+    def note_splash(self, now: float) -> None:
+        """Record the startup splash displaying; arm 'hello' to greet."""
+        self._now = now
+        self._pending.add("hello")
+
     def note_spawn(self, now: float, raccoons_on_screen: int) -> None:
         """Record a successful spawn; drives hello / fun / raccoons."""
         self._now = now
-        # hello: first spawn ever, or first spawn after a long idle gap.
-        if not self._first_spawn_done or (
-            self._last_spawn_time is not None
-            and now - self._last_spawn_time >= config.HELLO_IDLE_S
-        ):
+        # hello: first spawn after a long idle gap re-greets.
+        if (self._last_spawn_time is not None
+                and now - self._last_spawn_time >= config.HELLO_IDLE_S):
             self._pending.add("hello")
-        self._first_spawn_done = True
         self._last_spawn_time = now
         # fun: arm when the counter passes its threshold, then re-draw.
         self._spawn_count += 1
