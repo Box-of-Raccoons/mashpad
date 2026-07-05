@@ -10,3 +10,5 @@ tools/node_modules/
 tools/raw/
 tools/stickers/
 tools/package*.json
+# API keys (gen tools read GEMINI_VOICE_KEY* from here)
+.env
