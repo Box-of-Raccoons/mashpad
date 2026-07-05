@@ -10,12 +10,20 @@ def _rng(seed=0):
     return random.Random(seed)
 
 
+# 3-male / 3-female set mirroring the real voice packs.
+_MF = ["m1", "m2", "m3", "f1", "f2", "f3"]
+_MF_GENDERS = {
+    "m1": "male", "m2": "male", "m3": "male",
+    "f1": "female", "f2": "female", "f3": "female",
+}
+
+
 # ---------------------------------------------------------------------------
 # Empty voice list
 # ---------------------------------------------------------------------------
 
 def test_empty_voices_current_none():
-    sel = VoiceSelector([], "random", 10, _rng())
+    sel = VoiceSelector([], "random", {}, _rng())
     assert sel.current() is None
     for _ in range(20):
         sel.on_keystroke()
@@ -23,9 +31,11 @@ def test_empty_voices_current_none():
 
 
 def test_empty_voices_cycle_none():
-    sel = VoiceSelector([], "cycle", 3, _rng())
+    sel = VoiceSelector([], "cycle", {}, _rng())
     assert sel.current() is None
     sel.on_keystroke()
+    assert sel.current() is None
+    sel.on_trigger()
     assert sel.current() is None
 
 
@@ -34,10 +44,17 @@ def test_empty_voices_cycle_none():
 # ---------------------------------------------------------------------------
 
 def test_fixed_voice_always_same():
-    sel = VoiceSelector(["a", "b", "c"], "b", 10, _rng())
+    sel = VoiceSelector(["a", "b", "c"], "b", {}, _rng())
     assert sel.current() == "b"
     for _ in range(50):
         sel.on_keystroke()
+        assert sel.current() == "b"
+
+
+def test_fixed_voice_ignores_trigger():
+    sel = VoiceSelector(["a", "b", "c"], "b", {}, _rng())
+    for _ in range(10):
+        sel.on_trigger()
         assert sel.current() == "b"
 
 
@@ -47,7 +64,7 @@ def test_fixed_voice_always_same():
 
 def test_unknown_voice_falls_back_to_random():
     voices = ["a", "b", "c"]
-    sel = VoiceSelector(voices, "does-not-exist", 10, _rng(1))
+    sel = VoiceSelector(voices, "does-not-exist", {}, _rng(1))
     seen = set()
     for _ in range(300):
         sel.on_keystroke()
@@ -62,7 +79,7 @@ def test_unknown_voice_falls_back_to_random():
 
 def test_random_stays_in_list():
     voices = ["a", "b", "c"]
-    sel = VoiceSelector(voices, "random", 10, _rng(1))
+    sel = VoiceSelector(voices, "random", {}, _rng(1))
     for _ in range(300):
         sel.on_keystroke()
         assert sel.current() in voices
@@ -70,7 +87,7 @@ def test_random_stays_in_list():
 
 def test_random_reaches_all_voices():
     voices = ["a", "b", "c"]
-    sel = VoiceSelector(voices, "random", 10, _rng(1))
+    sel = VoiceSelector(voices, "random", {}, _rng(1))
     seen = set()
     for _ in range(300):
         sel.on_keystroke()
@@ -78,37 +95,74 @@ def test_random_reaches_all_voices():
     assert seen == set(voices)
 
 
+def test_random_ignores_trigger():
+    voices = ["a", "b", "c"]
+    sel = VoiceSelector(voices, "random", {}, _rng(1))
+    before = sel.current()
+    sel.on_trigger()
+    assert sel.current() == before  # on_trigger is a no-op in random mode
+
+
 # ---------------------------------------------------------------------------
-# Cycle mode — every-N boundary + wrap
+# Cycle mode — keystrokes no longer advance; triggers do
 # ---------------------------------------------------------------------------
 
-def test_cycle_advances_every_n_and_wraps():
-    sel = VoiceSelector(["a", "b", "c"], "cycle", 3, _rng())
-    assert sel.current() == "a"  # initial
-    seq = []
-    for _ in range(9):
-        sel.on_keystroke()
-        seq.append(sel.current())
-    # Switch happens on the 3rd, 6th, 9th keystroke; wraps c → a at #9.
-    assert seq == ["a", "a", "b", "b", "b", "c", "c", "c", "a"]
-
-
-def test_cycle_every_one_switches_each_keystroke():
-    sel = VoiceSelector(["a", "b"], "cycle", 1, _rng())
+def test_cycle_initial_is_first_voice():
+    sel = VoiceSelector(["a", "b", "c"], "cycle", {}, _rng())
     assert sel.current() == "a"
-    seq = []
-    for _ in range(4):
+
+
+def test_cycle_keystrokes_do_not_advance():
+    sel = VoiceSelector(["a", "b", "c"], "cycle", _MF_GENDERS, _rng())
+    for _ in range(100):
         sel.on_keystroke()
-        seq.append(sel.current())
-    assert seq == ["b", "a", "b", "a"]
+        assert sel.current() == "a"  # the current voice stays put across keys
 
 
 def test_cycle_single_voice_stays():
-    sel = VoiceSelector(["only"], "cycle", 2, _rng())
+    sel = VoiceSelector(["only"], "cycle", {}, _rng())
     assert sel.current() == "only"
     for _ in range(10):
         sel.on_keystroke()
+        sel.on_trigger()
         assert sel.current() == "only"
+
+
+def test_cycle_trigger_alternates_gender():
+    sel = VoiceSelector(_MF, "cycle", _MF_GENDERS, _rng())
+    assert sel.current() == "m1"  # male
+    genders = []
+    for _ in range(6):
+        sel.on_trigger()
+        genders.append(_MF_GENDERS[sel.current()])
+    # Every step flips male<->female (starting from a male current).
+    assert genders == ["female", "male", "female", "male", "female", "male"]
+    # And it lands on real voices from the list each time.
+    sel2 = VoiceSelector(_MF, "cycle", _MF_GENDERS, _rng())
+    for _ in range(6):
+        sel2.on_trigger()
+        assert sel2.current() in _MF
+
+
+def test_cycle_trigger_all_one_gender_round_robin():
+    voices = ["a", "b", "c"]
+    genders = {"a": "male", "b": "male", "c": "male"}
+    sel = VoiceSelector(voices, "cycle", genders, _rng())
+    seq = []
+    for _ in range(4):
+        sel.on_trigger()
+        seq.append(sel.current())
+    assert seq == ["b", "c", "a", "b"]  # plain round-robin, no gender to alternate
+
+
+def test_cycle_trigger_no_genders_round_robin():
+    voices = ["a", "b", "c"]
+    sel = VoiceSelector(voices, "cycle", {}, _rng())
+    seq = []
+    for _ in range(4):
+        sel.on_trigger()
+        seq.append(sel.current())
+    assert seq == ["b", "c", "a", "b"]  # unknown genders → plain round-robin
 
 
 # ---------------------------------------------------------------------------

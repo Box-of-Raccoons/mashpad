@@ -58,11 +58,46 @@ ITEM_SIZE_PX = 280
 # Subdirectory under assets/ that holds custom PNG sticker images.
 IMAGES_DIR_NAME = "images"
 
-# Keystrokes between voice switches when voice_mode == "cycle".
-CYCLE_EVERY = 200
-
 # Probability a non-letter spawn is an image (when images exist), per setting.
 RACCOON_WEIGHTS = {"less": 0.25, "normal": 0.5, "lots": 0.75}
 
 # Filename (under the repo root) where grown-up options persist.
 SETTINGS_FILE = "settings.json"
+
+# Known voice packs → (friendly menu label, gender). Unknown packs fall back to
+# the name title-cased with gender None (see menu.py / main.py).
+VOICE_INFO = {
+    "charon": ("Voice 1", "male"),
+    "fenrir": ("Voice 2", "male"),
+    "algenib": ("Voice 3", "male"),
+    "vindemiatrix": ("Voice 4", "female"),
+    "achernar": ("Voice 5", "female"),
+    "kore": ("Voice 6", "female"),
+}
+
+# Copyright year shown in the options-menu About footer.
+BUILD_YEAR = 2026
+
+# Company name shown in the options-menu About footer.
+COMPANY = "Box of Raccoons LLC"
+
+# Global minimum seconds between ANY two spoken phrases (see phrases.py).
+PHRASE_COOLDOWN_S = 60.0
+
+# Probability an eligible (non-hello) phrase trigger actually fires when polled.
+PHRASE_CHANCE = 0.5
+
+# Uniform-random window (min, max spawns) between "fun" phrase re-arms.
+FUN_EVERY_SPAWNS = (250, 400)
+
+# Live raccoon (image) items on screen that arm the "raccoons" phrase.
+RACCOON_PILE_N = 4
+
+# Rate-limiter drops within SLOWDOWN_WINDOW_S that count as mashing → "slowdown".
+SLOWDOWN_DROPS = 6
+
+# Sliding window (seconds) over which SLOWDOWN_DROPS drops are counted.
+SLOWDOWN_WINDOW_S = 3.0
+
+# Idle seconds with no spawn after which the next spawn re-triggers "hello".
+HELLO_IDLE_S = 300.0
