@@ -258,6 +258,7 @@ def main(argv=None) -> None:
             trigger = director.poll()
             if trigger is not None:
                 selector.on_trigger()
+                print(f"[mashpad] phrase: {trigger} ({selector.current() or 'default'})")
                 audio.play_phrase(trigger, rng, selector.current())
 
         screen.fill(render.BACKGROUND)

@@ -87,6 +87,12 @@ PHRASE_COOLDOWN_S = 60.0
 # Probability an eligible (non-hello) phrase trigger actually fires when polled.
 PHRASE_CHANCE = 0.5
 
+# Channel volume for non-phrase audio while a phrase clip is speaking.
+PHRASE_DUCK_FACTOR = 0.25
+
+# Extra seconds the duck window stays open after the phrase clip ends.
+PHRASE_DUCK_TAIL_S = 0.25
+
 # Uniform-random window (min, max spawns) between "fun" phrase re-arms.
 FUN_EVERY_SPAWNS = (250, 400)
 

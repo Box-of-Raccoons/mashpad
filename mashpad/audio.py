@@ -19,6 +19,7 @@ from pathlib import Path
 import pygame
 
 from mashpad import config, paths
+from mashpad.duck import DuckWindow
 
 
 def repo_root() -> Path:
@@ -46,6 +47,7 @@ class Audio:
         self._cache: dict[Path, "pygame.mixer.Sound | None"] = {}
         self._effects: list["pygame.mixer.Sound"] = []  # 8 small clips — eager
         self._master: float = 1.0  # 0.0–1.0, set by set_master_volume()
+        self._duck = DuckWindow()  # non-phrase audio ducks while a phrase speaks
 
         if muted:
             print("[mashpad audio] muted (--mute); running silent")
@@ -121,7 +123,19 @@ class Audio:
         if clip is None:
             return
         clip.set_volume(self._master)
-        self._play(clip)
+        channel = self._play(clip)
+        if channel is None:
+            return
+        # Duck every busy channel, then restore the phrase's own to full volume
+        # last — Channel(i) wrappers don't compare by underlying channel, so
+        # "duck all, then un-duck ours" is the only reliable order.
+        now = pygame.time.get_ticks() / 1000.0
+        self._duck.open(now, clip.get_length())
+        for i in range(pygame.mixer.get_num_channels()):
+            other = pygame.mixer.Channel(i)
+            if other.get_busy():
+                other.set_volume(config.PHRASE_DUCK_FACTOR)
+        channel.set_volume(1.0)
 
     # ----------------------------------------------------------------- loading
 
@@ -220,10 +234,14 @@ class Audio:
 
     # ---------------------------------------------------------------- playback
 
-    def _play(self, sound: "pygame.mixer.Sound") -> None:
+    def _play(self, sound: "pygame.mixer.Sound"):
         # find_channel() returns None when every channel is busy — skip rather
         # than block or forcibly steal a playing channel.
         channel = pygame.mixer.find_channel()
         if channel is None:
-            return
+            return None
+        # Channel volume persists across reuse, so set it on every acquisition:
+        # ducked while a phrase is speaking, full otherwise (clears stale ducks).
+        channel.set_volume(self._duck.factor(pygame.time.get_ticks() / 1000.0))
         channel.play(sound)
+        return channel
