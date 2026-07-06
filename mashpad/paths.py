@@ -34,6 +34,17 @@ def app_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def source_dir() -> Path:
+    """Directory holding the mashpad package .py source (what BabyIDE reads).
+
+    Not frozen (dev + Pi): the `mashpad` package dir itself. Frozen: the
+    `mashpad_src` folder the PyInstaller spec bundles under app_root().
+    """
+    if getattr(sys, "frozen", False):
+        return app_root() / "mashpad_src"
+    return Path(__file__).resolve().parent
+
+
 def data_dir() -> Path:
     """Writable directory for settings.json; created if missing.
 
