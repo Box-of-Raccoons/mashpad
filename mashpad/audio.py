@@ -19,6 +19,7 @@ from pathlib import Path
 import pygame
 
 from mashpad import config, paths
+from mashpad.duck import DuckWindow
 
 
 def repo_root() -> Path:
@@ -46,6 +47,9 @@ class Audio:
         self._cache: dict[Path, "pygame.mixer.Sound | None"] = {}
         self._effects: list["pygame.mixer.Sound"] = []  # 8 small clips — eager
         self._master: float = 1.0  # 0.0–1.0, set by set_master_volume()
+        self._duck = DuckWindow()  # non-phrase audio ducks while a phrase speaks
+        # A phrase waiting for its scheduled start time: (Sound, start_seconds).
+        self._pending_phrase: "tuple[pygame.mixer.Sound, float] | None" = None
 
         if muted:
             print("[mashpad audio] muted (--mute); running silent")
@@ -54,6 +58,11 @@ class Audio:
         try:
             pygame.mixer.init()
             pygame.mixer.set_num_channels(config.MIXER_CHANNELS)
+            # Channel 0 belongs to phrases; the bed allocator below never hands
+            # it out, so a mash burst can't starve a firing phrase of a channel.
+            # (set_reserved() is NOT used: pygame-ce 2.5.7's find_channel()
+            # ignores reservations — verified empirically.)
+            self._phrase_channel = pygame.mixer.Channel(0)
         except Exception as exc:  # noqa: BLE001 — any mixer failure → silent mode
             print(f"[mashpad audio] mixer init failed ({exc}); running silent")
             return
@@ -121,7 +130,32 @@ class Audio:
         if clip is None:
             return
         clip.set_volume(self._master)
-        self._play(clip)
+        # Open the duck envelope now; the phrase itself starts after the lead
+        # (update() launches it) so the bed is already quiet when speech begins.
+        now = pygame.time.get_ticks() / 1000.0
+        start = self._duck.open(now, clip.get_length())
+        self._pending_phrase = (clip, start)
+
+    def update(self, now: float) -> None:
+        """Per-frame: start a due phrase and apply the duck envelope to the bed.
+
+        The phrase plays on the reserved channel 0 — never dropped when the bed
+        has every open channel busy; a new phrase interrupts the previous one.
+        Channels 1.. are the bed and follow the envelope every frame, which is
+        also what fades them smoothly instead of stepping.
+        """
+        if not self._ok:
+            return
+        if self._pending_phrase is not None and now >= self._pending_phrase[1]:
+            clip, _ = self._pending_phrase
+            self._pending_phrase = None
+            self._phrase_channel.set_volume(1.0)
+            self._phrase_channel.play(clip)
+        bed_volume = self._duck.factor(now)
+        for i in range(1, pygame.mixer.get_num_channels()):
+            channel = pygame.mixer.Channel(i)
+            if channel.get_busy():
+                channel.set_volume(bed_volume)
 
     # ----------------------------------------------------------------- loading
 
@@ -220,10 +254,20 @@ class Audio:
 
     # ---------------------------------------------------------------- playback
 
-    def _play(self, sound: "pygame.mixer.Sound") -> None:
-        # find_channel() returns None when every channel is busy — skip rather
-        # than block or forcibly steal a playing channel.
-        channel = pygame.mixer.find_channel()
+    def _play(self, sound: "pygame.mixer.Sound"):
+        # First idle bed channel (1..); None when all are busy — skip rather
+        # than block or forcibly steal a playing channel. Channel 0 is the
+        # phrase channel and is never used for the bed.
+        channel = None
+        for i in range(1, pygame.mixer.get_num_channels()):
+            candidate = pygame.mixer.Channel(i)
+            if not candidate.get_busy():
+                channel = candidate
+                break
         if channel is None:
-            return
+            return None
+        # Born at the current envelope volume; update() keeps it tracking the
+        # fade every frame after that.
+        channel.set_volume(self._duck.factor(pygame.time.get_ticks() / 1000.0))
         channel.play(sound)
+        return channel

@@ -50,7 +50,7 @@ TRAIL_FADE_S = 0.6
 TRAIL_MAX_POINTS = 64
 
 # Number of pygame mixer channels to allocate.
-MIXER_CHANNELS = 8
+MIXER_CHANNELS = 9  # 8 for letters/effects + 1 reserved for reactive phrases
 
 # Rendered size (diameter / side) of each item in pixels at scale=1.0.
 ITEM_SIZE_PX = 280
@@ -82,10 +82,26 @@ BUILD_YEAR = 2026
 COMPANY = "Box of Raccoons LLC"
 
 # Global minimum seconds between ANY two spoken phrases (see phrases.py).
-PHRASE_COOLDOWN_S = 60.0
+PHRASE_COOLDOWN_S = 30.0
 
 # Probability an eligible (non-hello) phrase trigger actually fires when polled.
 PHRASE_CHANCE = 0.5
+
+# Channel volume for non-phrase audio while a phrase clip is speaking.
+PHRASE_DUCK_FACTOR = 0.075
+
+# Seconds between a trigger firing and the phrase speaking — the bed ducks
+# during this lead so the phrase opening is never lost in the noise.
+PHRASE_LEAD_S = 0.45
+
+# Seconds the bed takes to fade down to PHRASE_DUCK_FACTOR when a phrase fires.
+PHRASE_DUCK_FADE_DOWN_S = 0.2
+
+# Extra seconds the bed stays ducked after the phrase clip ends.
+PHRASE_DUCK_TAIL_S = 0.35
+
+# Seconds the bed takes to fade back to full volume after the tail.
+PHRASE_DUCK_FADE_UP_S = 0.5
 
 # Uniform-random window (min, max spawns) between "fun" phrase re-arms.
 FUN_EVERY_SPAWNS = (250, 400)

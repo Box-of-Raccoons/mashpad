@@ -30,18 +30,26 @@ class FakeRNG:
 # hello
 # ---------------------------------------------------------------------------
 
-def test_hello_fires_on_first_spawn():
+def test_hello_fires_on_splash():
     d = PhraseDirector(FakeRNG(), now=0.0)
-    d.note_spawn(0.0, 0)
+    d.note_splash(0.0)
     assert d.poll() == "hello"
     # Fires once, then is discarded until re-armed.
     assert d.poll() is None
 
 
-def test_hello_re_arms_after_idle():
+def test_first_spawn_does_not_arm_hello():
+    # hello greets at the splash, not on the first spawn.
     d = PhraseDirector(FakeRNG(), now=0.0)
     d.note_spawn(0.0, 0)
+    assert d.poll() is None
+
+
+def test_hello_re_arms_after_idle():
+    d = PhraseDirector(FakeRNG(), now=0.0)
+    d.note_splash(0.0)
     assert d.poll() == "hello"
+    d.note_spawn(0.0, 0)
     # A spawn before the idle threshold does NOT re-arm hello.
     d.note_spawn(100.0, 0)
     assert d.poll() is None
@@ -57,7 +65,7 @@ def test_hello_exempt_from_cooldown_and_chance():
     d = PhraseDirector(FakeRNG(randoms=[0.1], default_random=0.9), now=0.0)
     d.note_cap_hit(0.0)
     assert d.poll() == "screenfull"          # flip 0.1 passes; last_phrase = 0
-    d.note_spawn(10.0, 0)                     # first spawn arms hello, within 60s
+    d.note_splash(10.0)                       # splash arms hello, within 60s
     assert d.poll() == "hello"               # fires with no flip and inside cooldown
 
 
@@ -91,8 +99,7 @@ def test_slowdown_window_expiry():
 def test_raccoons_arms_at_pile():
     d = PhraseDirector(FakeRNG(), now=0.0)
     d.note_spawn(0.0, config.RACCOON_PILE_N - 1)  # below the pile
-    # (this first spawn also arms hello — drain it so raccoons is isolated)
-    assert d.poll() == "hello"
+    assert d.poll() is None
     d.note_spawn(config.HELLO_IDLE_S + 1.0, config.RACCOON_PILE_N)  # at the pile
     # hello re-armed by the long idle gap outranks raccoons; drain it.
     assert d.poll() == "hello"
@@ -109,12 +116,10 @@ def test_raccoons_arms_at_pile():
 def test_fun_arms_at_threshold_and_rearms():
     # First threshold 2, next draw 999 (so it won't re-arm during the test).
     d = PhraseDirector(FakeRNG(randints=[2, 999]), now=0.0)
-    d.note_spawn(0.0, 0)          # spawn #1 → arms hello, fun counter = 1
-    assert d.poll() == "hello"
+    d.note_spawn(0.0, 0)          # spawn #1 → fun counter = 1, nothing armed
+    assert d.poll() is None
     d.note_spawn(1.0, 0)          # spawn #2 → counter hits 2 → fun armed + re-draw
-    assert d.poll() is None       # blocked by hello's global cooldown
-    d.note_spawn(1.0 + config.PHRASE_COOLDOWN_S + 1.0, 0)  # advance past cooldown
-    assert d.poll() == "fun"
+    assert d.poll() == "fun"      # nothing fired yet, so no cooldown in the way
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +128,8 @@ def test_fun_arms_at_threshold_and_rearms():
 
 def test_global_cooldown_blocks_until_elapsed():
     d = PhraseDirector(FakeRNG(), now=0.0)
-    d.note_spawn(0.0, config.RACCOON_PILE_N)  # arms hello + raccoons
+    d.note_splash(0.0)                        # arms hello
+    d.note_spawn(0.0, config.RACCOON_PILE_N)  # arms raccoons
     assert d.poll() == "hello"                # last_phrase = 0
     # raccoons stays pending but is blocked while < PHRASE_COOLDOWN_S has passed.
     d.note_drop(config.PHRASE_COOLDOWN_S - 1.0)
@@ -138,7 +144,8 @@ def test_global_cooldown_blocks_until_elapsed():
 
 def test_per_trigger_cooldown():
     d = PhraseDirector(FakeRNG(), now=0.0)
-    d.note_spawn(0.0, config.RACCOON_PILE_N)  # hello + raccoons
+    d.note_splash(0.0)                        # hello
+    d.note_spawn(0.0, config.RACCOON_PILE_N)  # raccoons
     assert d.poll() == "hello"
     # Fire raccoons once the global cooldown clears.
     d.note_spawn(config.PHRASE_COOLDOWN_S, config.RACCOON_PILE_N)
@@ -170,13 +177,30 @@ def test_failed_flip_discards_until_rearm():
 # priority
 # ---------------------------------------------------------------------------
 
+def test_least_recently_fired_beats_fresh_rearm():
+    # screenfull fires once; later BOTH screenfull and raccoons are armed and
+    # past every cooldown. Never-heard raccoons must win the slot even though
+    # screenfull sits higher in the tie-break order.
+    d = PhraseDirector(FakeRNG(), now=0.0)
+    d.note_cap_hit(0.0)
+    assert d.poll() == "screenfull"
+    later = 3 * config.PHRASE_COOLDOWN_S + 1.0   # clear per-trigger cooldown too
+    d.note_cap_hit(later)                         # re-arm screenfull
+    d.note_spawn(later, config.RACCOON_PILE_N)    # arm raccoons
+    assert d.poll() == "raccoons"
+    # next slot (past the global cooldown) goes back to screenfull
+    d.note_drop(later + config.PHRASE_COOLDOWN_S)
+    assert d.poll() == "screenfull"
+
+
 def test_priority_hello_slowdown_screenfull_raccoons_fun():
     # fun threshold 1 so a single spawn arms it; re-draw 999 after.
     d = PhraseDirector(FakeRNG(randints=[1, 999]), now=0.0)
     for i in range(config.SLOWDOWN_DROPS):     # arm slowdown
         d.note_drop(i * 0.05)
     d.note_cap_hit(0.5)                         # arm screenfull
-    d.note_spawn(0.5, config.RACCOON_PILE_N)    # arm hello + raccoons + fun
+    d.note_splash(0.5)                          # arm hello
+    d.note_spawn(0.5, config.RACCOON_PILE_N)    # arm raccoons + fun
     # All five pending; each poll returns the highest still-eligible one. Advance
     # time between polls (single far-apart drops) to clear the global cooldown.
     assert d.poll() == "hello"

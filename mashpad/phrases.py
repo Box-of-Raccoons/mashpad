@@ -4,10 +4,13 @@
 # the caller; the module never reads the clock. main.py feeds it drops, spawns
 # and cap hits, then calls poll() once per frame; audio.py plays the clip.
 #
-# Triggers (priority high → low): hello > slowdown > screenfull > raccoons > fun.
-#   * hello     — first spawn ever, or the first spawn after HELLO_IDLE_S idle.
-#                 EXEMPT from the chance flip and the global cooldown: it should
-#                 reliably greet.
+# Triggers: hello always wins; the rest take turns — the armed trigger heard
+# least recently fires first (never-heard beats everything), so a busy session
+# can't let slowdown/screenfull starve raccoons. Ties fall back to the order
+# below.
+#   * hello     — the startup splash displaying, or the first spawn after
+#                 HELLO_IDLE_S idle. EXEMPT from the chance flip and the global
+#                 cooldown: it should reliably greet.
 #   * slowdown  — SLOWDOWN_DROPS rate-limiter drops within SLOWDOWN_WINDOW_S.
 #   * screenfull— the item field force-faded because the MAX_ITEMS cap was hit.
 #   * raccoons  — RACCOON_PILE_N or more image items live on screen.
@@ -17,7 +20,7 @@ from __future__ import annotations
 
 from mashpad import config
 
-# Priority order used by poll(): the first eligible candidate fires.
+# Tie-break order for candidates that have never fired (hello always first).
 _PRIORITY = ("hello", "slowdown", "screenfull", "raccoons", "fun")
 
 
@@ -35,8 +38,7 @@ class PhraseDirector:
         # fun: spawn counter + the random threshold it must pass to arm.
         self._spawn_count = 0
         self._fun_threshold = self._draw_fun()
-        # hello: has anything spawned yet, and when did the last spawn happen.
-        self._first_spawn_done = False
+        # hello: when did the last spawn happen (drives the idle re-greet).
         self._last_spawn_time = None
 
     def _draw_fun(self) -> int:
@@ -54,16 +56,18 @@ class PhraseDirector:
         if len(self._drop_times) >= config.SLOWDOWN_DROPS:
             self._pending.add("slowdown")
 
+    def note_splash(self, now: float) -> None:
+        """Record the startup splash displaying; arm 'hello' to greet."""
+        self._now = now
+        self._pending.add("hello")
+
     def note_spawn(self, now: float, raccoons_on_screen: int) -> None:
         """Record a successful spawn; drives hello / fun / raccoons."""
         self._now = now
-        # hello: first spawn ever, or first spawn after a long idle gap.
-        if not self._first_spawn_done or (
-            self._last_spawn_time is not None
-            and now - self._last_spawn_time >= config.HELLO_IDLE_S
-        ):
+        # hello: first spawn after a long idle gap re-greets.
+        if (self._last_spawn_time is not None
+                and now - self._last_spawn_time >= config.HELLO_IDLE_S):
             self._pending.add("hello")
-        self._first_spawn_done = True
         self._last_spawn_time = now
         # fun: arm when the counter passes its threshold, then re-draw.
         self._spawn_count += 1
@@ -85,14 +89,20 @@ class PhraseDirector:
     def poll(self) -> "str | None":
         """Return one trigger to speak, or None. At most one per call.
 
-        Candidates are considered high → low priority. A candidate blocked by a
-        cooldown is skipped (stays armed for later). An eligible non-hello
-        candidate must win a PHRASE_CHANCE coin flip; a lost flip discards that
-        candidacy until it re-arms, and consideration falls through to the next
-        candidate. hello is exempt from both the flip and the global cooldown.
+        hello is considered first and is exempt from the flip and the global
+        cooldown. The remaining armed candidates are considered least-recently-
+        fired first (never-fired first of all, in _PRIORITY order), so variety
+        self-balances. A candidate blocked by a cooldown is skipped (stays
+        armed for later). An eligible candidate must win a PHRASE_CHANCE coin
+        flip; a lost flip discards that candidacy until it re-arms, and
+        consideration falls through to the next candidate.
         """
         now = self._now
-        for trigger in _PRIORITY:
+        order = sorted(
+            (t for t in _PRIORITY if t != "hello"),
+            key=lambda t: (self._last_fired.get(t, float("-inf")), _PRIORITY.index(t)),
+        )
+        for trigger in ("hello", *order):
             if trigger not in self._pending:
                 continue
             # Per-trigger cooldown: 3× the global minimum.
