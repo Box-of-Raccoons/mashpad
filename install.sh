@@ -91,6 +91,13 @@ if ! sudo -u "${SCRIPT_USER}" env PYTHONPATH="${REPO_DIR}" \
     echo "          Run manually: cd ${REPO_DIR} && python3 -m mashpad.gen_effects"
 fi
 
+echo "[install] Generating piano-melody notes..."
+if ! sudo -u "${SCRIPT_USER}" env PYTHONPATH="${REPO_DIR}" \
+        python3 -m mashpad.gen_notes; then
+    echo "[install] WARNING: gen_notes failed."
+    echo "          Run manually: cd ${REPO_DIR} && python3 -m mashpad.gen_notes"
+fi
+
 # ── 5. Generate voice clips ───────────────────────────────────────────────────
 
 echo "[install] Generating voice clips..."

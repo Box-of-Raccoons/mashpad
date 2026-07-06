@@ -26,8 +26,13 @@ _ROW_VOLUME = 1
 _ROW_LETTERS = 2
 _ROW_RACCOONS = 3
 _ROW_PHRASES = 4
-_ROW_QUIT = 5
-_ROW_COUNT = 6
+_ROW_SOUNDS = 5
+_ROW_QUIT = 6
+_ROW_COUNT = 7
+
+# Note auditioned when the Sounds row is switched to Piano (mirrors the voice-row
+# "hello" audition). A mid-range generated note so grown-ups hear the timbre.
+_AUDITION_NOTE = "c5"
 
 
 class _SampleWord:
@@ -115,6 +120,8 @@ class Menu:
             self._step_raccoons(direction)
         elif row == _ROW_PHRASES:
             self._step_phrases()
+        elif row == _ROW_SOUNDS:
+            self._step_sounds()
         # Quit row: no left/right value.
 
     # --------------------------------------------------------------- row logic
@@ -167,6 +174,17 @@ class Menu:
         self._settings.phrases = not self._settings.phrases
         self._save()
 
+    def _step_sounds(self) -> None:
+        # Two-value toggle: left and right both flip piano <-> dings.
+        self._settings.sound_mode = (
+            "dings" if self._settings.sound_mode == "piano" else "piano"
+        )
+        self._save()
+        # Audition one note when switching to Piano so grown-ups hear the timbre
+        # (the Dings side is auditioned by its own random effect on real spawns).
+        if self._settings.sound_mode == "piano":
+            self._audio.play_note(_AUDITION_NOTE)
+
     def _save(self) -> None:
         settings_mod.save(self._settings, self._save_path)
 
@@ -189,6 +207,7 @@ class Menu:
             ("Letters", "ABC" if self._settings.letter_case == "upper" else "abc"),
             ("Raccoons", self._settings.raccoon_amount.title()),
             ("Phrases", "On" if self._settings.phrases else "Off"),
+            ("Sounds", "Piano" if self._settings.sound_mode == "piano" else "Dings"),
             ("Quit", ""),
         ]
 
