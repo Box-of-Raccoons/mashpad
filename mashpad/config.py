@@ -82,7 +82,7 @@ BUILD_YEAR = 2026
 COMPANY = "Box of Raccoons LLC"
 
 # Global minimum seconds between ANY two spoken phrases (see phrases.py).
-PHRASE_COOLDOWN_S = 60.0
+PHRASE_COOLDOWN_S = 30.0
 
 # Probability an eligible (non-hello) phrase trigger actually fires when polled.
 PHRASE_CHANCE = 0.5
