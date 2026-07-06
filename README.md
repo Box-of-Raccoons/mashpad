@@ -81,9 +81,30 @@ sudo bash install.sh
 Reboot when it finishes — mashpad starts automatically on tty1.
 
 `install.sh` handles everything: system packages (`python3-pygame`,
-`python3-numpy`, `espeak-ng`), piper install and model download, sound
-generation, and systemd service setup. Piper steps are optional — if they fail,
-espeak-ng is used instead.
+`python3-numpy`, `espeak-ng`), the display runtime (see below), piper install
+and model download, sound generation, and systemd service setup. Piper steps are
+optional — if they fail, espeak-ng is used instead.
+
+### How it reaches the screen (no desktop needed)
+
+Still Raspberry Pi OS **Lite** — there's no desktop environment. But mashpad
+doesn't draw to the framebuffer directly: SDL's bare `kmsdrm` backend fails to
+present on the Pi 4's split GPU (the v3d core renders, the vc4 core scans out),
+so the app renders black. Instead the service runs mashpad inside
+[**cage**](https://github.com/cage-kiosk/cage) — a single-application Wayland
+kiosk — which drives that GPU path correctly. `install.sh` therefore also
+installs:
+
+- **`libgl1-mesa-dri libegl1 libgles2`** — the Mesa EGL/GLES userspace. A bare
+  Lite image ships none of it (the text console uses the kernel framebuffer), so
+  without these SDL dies at startup with `EGL not initialized`.
+- **`cage`** — the kiosk compositor mashpad runs inside.
+- **`seatd`** — a seat manager that grants cage DRM + VT access (a systemd system
+  service has no login session to get a seat from). It's enabled at install time,
+  and the unit runs as your user with the `_seatd` group.
+
+None of this is a desktop — it's the minimum needed to put a fullscreen app on
+the screen from a headless Lite boot.
 
 ## Audio output (Pi)
 
