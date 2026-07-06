@@ -37,6 +37,7 @@ a = Analysis(
     datas=[
         (str(REPO / "assets"), "assets"),
         (str(REPO / "sounds"), "sounds"),
+        (str(REPO / "mashpad"), "mashpad_src"),
     ],
     hiddenimports=[],
     excludes=["numpy", "tkinter", "unittest", "pydoc"],  # numpy is gen-tool only

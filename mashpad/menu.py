@@ -27,8 +27,9 @@ _ROW_LETTERS = 2
 _ROW_RACCOONS = 3
 _ROW_PHRASES = 4
 _ROW_SOUNDS = 5
-_ROW_QUIT = 6
-_ROW_COUNT = 7
+_ROW_DISPLAY = 6
+_ROW_QUIT = 7
+_ROW_COUNT = 8
 
 # Note auditioned when the Sounds row is switched to Piano (mirrors the voice-row
 # "hello" audition). A mid-range generated note so grown-ups hear the timbre.
@@ -122,6 +123,8 @@ class Menu:
             self._step_phrases()
         elif row == _ROW_SOUNDS:
             self._step_sounds()
+        elif row == _ROW_DISPLAY:
+            self._step_display()
         # Quit row: no left/right value.
 
     # --------------------------------------------------------------- row logic
@@ -185,6 +188,13 @@ class Menu:
         if self._settings.sound_mode == "piano":
             self._audio.play_note(_AUDITION_NOTE)
 
+    def _step_display(self) -> None:
+        # Two-value toggle: left and right both flip smash <-> babyide.
+        self._settings.display_mode = (
+            "babyide" if self._settings.display_mode == "smash" else "smash"
+        )
+        self._save()
+
     def _save(self) -> None:
         settings_mod.save(self._settings, self._save_path)
 
@@ -208,6 +218,7 @@ class Menu:
             ("Raccoons", self._settings.raccoon_amount.title()),
             ("Phrases", "On" if self._settings.phrases else "Off"),
             ("Sounds", "Piano" if self._settings.sound_mode == "piano" else "Dings"),
+            ("Display", "BabyIDE" if self._settings.display_mode == "babyide" else "Smash"),
             ("Quit", ""),
         ]
 

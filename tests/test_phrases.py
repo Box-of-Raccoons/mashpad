@@ -279,3 +279,21 @@ def test_arm_ttl_rearmed_trigger_survives():
 def test_phrases_no_pygame():
     import mashpad.phrases  # noqa: F401
     assert "pygame" not in sys.modules, "phrases imported pygame!"
+
+
+# ---------------------------------------------------------------------------
+# Content guard — the BabyIDE "manager" phrase catalogue must stay populated, so
+# an accidental deletion surfaces as a red test here instead of silence in-app.
+# ---------------------------------------------------------------------------
+
+def test_manager_phrase_catalogue_populated():
+    import json
+    from pathlib import Path
+
+    catalogue = json.loads(
+        (Path(__file__).resolve().parents[1] / "tools" / "phrases.json").read_text(encoding="utf-8")
+    )
+    manager = catalogue.get("manager")
+    assert isinstance(manager, list), "phrases.json is missing the 'manager' list"
+    assert len(manager) >= 10, f"expected >=10 manager sayings, got {len(manager)}"
+    assert all(isinstance(s, str) and s.strip() for s in manager), "empty/non-string manager saying"

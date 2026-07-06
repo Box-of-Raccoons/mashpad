@@ -21,6 +21,9 @@ RACCOON_AMOUNTS = ("less", "normal", "lots")
 # Effect layer on each spawn: "piano" steps through song melodies, "dings" plays
 # the classic random effect clips. Default piano (the MP-1 headline feature).
 SOUND_MODES = ("piano", "dings")
+# Display modes: "smash" (classic big-glyph key smasher) | "babyide" (prints
+# Mashpad's own source one token per keypress). Selected in the grown-up menu.
+DISPLAY_MODES = ("smash", "babyide")
 # Voice-mode selection constants.
 VOICE_MODE_RANDOM = "random"
 VOICE_MODE_CYCLE = "cycle"
@@ -41,6 +44,8 @@ class Settings:
     phrases: bool = True
     # "piano" (song melodies) | "dings" (classic random effects) on each spawn.
     sound_mode: str = "piano"
+    # "smash" (classic big glyphs) | "babyide" (prints Mashpad's own source).
+    display_mode: str = "smash"
 
 
 def _from_dict(raw: dict) -> Settings:
@@ -78,6 +83,10 @@ def _from_dict(raw: dict) -> Settings:
     if sm in SOUND_MODES:
         s.sound_mode = sm
 
+    dm = raw.get("display_mode")
+    if dm in DISPLAY_MODES:
+        s.display_mode = dm
+
     return s
 
 
@@ -110,6 +119,7 @@ def save(settings: Settings, path: Path) -> bool:
         "raccoon_amount": settings.raccoon_amount,
         "phrases": settings.phrases,
         "sound_mode": settings.sound_mode,
+        "display_mode": settings.display_mode,
     }
     try:
         with open(tmp, "w", encoding="utf-8") as fh:
