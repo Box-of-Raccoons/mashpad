@@ -1,0 +1,65 @@
+name: CI
+
+# Test on every push to the integration branches and on every PR; build the
+# Windows bundle only on pushes to develop/main and version tags (not PRs).
+on:
+  push:
+    branches: [develop, main]
+    tags: ['v*']          # release tags, e.g. v1.0.0 — adjust if you tag differently
+  pull_request:
+    branches: [develop, main]
+
+# A newer push to the same ref cancels an in-flight run.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (Linux, headless)
+    runs-on: ubuntu-latest
+    env:
+      # pygame/SDL run headless on the runner — no display or audio device.
+      SDL_VIDEODRIVER: dummy
+      SDL_AUDIODRIVER: dummy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'   # matches the dev environment
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+      - name: Run tests
+        run: python -m pytest -q
+
+  build-windows:
+    name: Build Windows bundle
+    needs: test                       # only build if the tests passed
+    if: github.event_name == 'push'   # pushes to develop/main + tags, never PRs
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt pyinstaller
+      - name: Generate audio assets
+        # Voice packs (.ogg) are committed; only the numpy-synth sets are
+        # generated here. All three feed the spec's asset guards.
+        run: |
+          python -m mashpad.gen_effects
+          python -m mashpad.gen_notes
+      - name: Build one-dir bundle (PyInstaller)
+        working-directory: packaging
+        run: python -m PyInstaller mashpad.spec --noconfirm
+      - name: Upload app bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: mashpad-windows
+          path: packaging/dist/mashpad
+          if-no-files-found: error
