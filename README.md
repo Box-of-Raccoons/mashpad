@@ -100,8 +100,9 @@ installs:
   without these SDL dies at startup with `EGL not initialized`.
 - **`cage`** — the kiosk compositor mashpad runs inside.
 - **`seatd`** — a seat manager that grants cage DRM + VT access (a systemd system
-  service has no login session to get a seat from). It's enabled at install time,
-  and the unit runs as your user with the `_seatd` group.
+  service has no login session to get a seat from). It's enabled at install time.
+  Debian runs it as `seatd -g video`, so the unit's existing `video` group
+  membership is all cage needs to reach the seat — no extra setup.
 
 None of this is a desktop — it's the minimum needed to put a fullscreen app on
 the screen from a headless Lite boot.

@@ -48,7 +48,8 @@ echo "[install] Installing system packages..."
 #     out), so the app renders black. cage drives the GL/scanout path correctly.
 #   seatd — seat manager. cage (via libseat) needs a seat for DRM + VT access;
 #     from a systemd system service there is no logind session, so seatd provides
-#     it. The unit runs as @USER@ with the _seatd supplementary group.
+#     it. Debian runs 'seatd -g video', so the socket is group-video and the
+#     existing 'video' membership in the unit is all cage needs — no extra group.
 if ! apt-get install -y --no-install-recommends \
         python3-pygame python3-numpy espeak-ng alsa-utils \
         libgl1-mesa-dri libegl1 libgles2 cage seatd; then
