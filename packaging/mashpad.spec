@@ -23,6 +23,14 @@ _note_clips = list((REPO / "sounds" / "notes").glob("*.wav"))
 if not _note_clips:
     raise SystemExit("mashpad.spec: sounds/notes contains no .wav clips — run `python -m mashpad.gen_notes` before building")
 
+# The effect clips (pops/boings/dings) are also gitignored and generated at
+# build time (gen_effects). Without them the dings mode — and the piano->dings
+# fallback when notes are missing — have nothing to play; fail loudly so a build
+# missing them isn't released.
+_effect_clips = list((REPO / "sounds" / "effects").glob("*.wav"))
+if not _effect_clips:
+    raise SystemExit("mashpad.spec: sounds/effects contains no .wav clips — run `python -m mashpad.gen_effects` before building")
+
 a = Analysis(
     [str(REPO / "packaging" / "launcher.py")],
     pathex=[str(REPO)],
