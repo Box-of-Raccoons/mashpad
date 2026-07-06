@@ -59,10 +59,16 @@ A kindergarten teacher is teaching words and letters to children
 
 TAG = "enthusiasm"  # set from --tag in main()
 
+# Phrases render one-call-each (reliable — no batch re-split to mangle expressive
+# lines) and rotate this delivery tag across the catalogue so the set has varied
+# inflection instead of one flat mood. Override with --tags. Validate by ear;
+# tags Gemini doesn't recognise just fall back to the base kindergarten delivery.
+DEFAULT_PHRASE_TAGS = ["enthusiasm", "laughing", "cheerful", "excited", "proud", "playful"]
 
-def tts(text: str, voice: str, key: str) -> tuple[bytes, int]:
+
+def tts(text: str, voice: str, key: str, tag: str = None) -> tuple[bytes, int]:
     body = {
-        "contents": [{"parts": [{"text": PROMPT.format(tag=TAG, text=text)}]}],
+        "contents": [{"parts": [{"text": PROMPT.format(tag=tag or TAG, text=text)}]}],
         "generationConfig": {
             "responseModalities": ["AUDIO"],
             "speechConfig": {"voiceConfig": {"prebuiltVoiceConfig": {"voiceName": voice}}},
@@ -115,11 +121,11 @@ def spoken_form(stem: str, text: str) -> str:
     return text
 
 
-def call_with_backoff(text: str, voice: str, key: str):
+def call_with_backoff(text: str, voice: str, key: str, tag: str = None):
     """tts() with 429-aware backoff. Raises after RETRIES failures."""
     for attempt in range(RETRIES):
         try:
-            return tts(text, voice, key)
+            return tts(text, voice, key, tag)
         except urllib.error.HTTPError as exc:
             if attempt == RETRIES - 1:
                 raise
@@ -206,7 +212,9 @@ def main() -> None:
     ap.add_argument("--voices", nargs="+", required=True)
     ap.add_argument("--takes", type=int, default=3)
     ap.add_argument("--phrases", help="JSON file {key: [phrase, ...]} — render phrases instead of the vocabulary")
-    ap.add_argument("--tag", default=None, help="delivery tag (default: enthusiasm for words, laughing for phrases)")
+    ap.add_argument("--keys", nargs="+", help="with --phrases, render only these catalogue keys (default: all) — use to add ONE new trigger without re-expanding existing packs")
+    ap.add_argument("--tag", default=None, help="single delivery tag for the vocabulary path (default: enthusiasm)")
+    ap.add_argument("--tags", nargs="+", default=None, help="phrase delivery tags, rotated across the catalogue (default: DEFAULT_PHRASE_TAGS)")
     ap.add_argument("--force", action="store_true")
     args = ap.parse_args()
 
@@ -215,15 +223,50 @@ def main() -> None:
 
     key = re.search(r"GEMINI_VOICE_KEY=(\S+)", SITE_ENV.read_text()).group(1)
 
+    # ── Phrases: one call per clip, tag rotated for varied inflection ──────────
+    # Batched re-splitting mangled expressive multi-clause lines (a "!" pause got
+    # mistaken for a between-item gap), so phrases render one API call each — no
+    # transcript to re-split. Variety comes from rotating the delivery tag across
+    # the catalogue rather than from multiple takes.
     if args.phrases:
         catalogue = json.loads(Path(args.phrases).read_text())
-        items = [(f"phrase-{k}-{i + 1}", v)
-                 for k, variants in catalogue.items()
-                 for i, v in enumerate(variants)]
-        takes = 1  # variants replace takes for phrases
-    else:
-        items = [(stem, spoken_form(stem, text)) for stem, text in _vocabulary()]
-        takes = args.takes
+        if args.keys:
+            catalogue = {k: v for k, v in catalogue.items() if k in args.keys}
+        tags = args.tags or DEFAULT_PHRASE_TAGS
+        items = []  # (stem, text, tag)
+        for k, variants in catalogue.items():
+            for i, v in enumerate(variants):
+                items.append((f"phrase-{k}-{i + 1}", v, tags[i % len(tags)]))
+
+        pending = []  # (voice, stem, text, tag, out)
+        for voice in args.voices:
+            out_dir = REPO / "sounds" / "voice" / voice.lower()
+            out_dir.mkdir(parents=True, exist_ok=True)
+            for stem, text, tag in items:
+                out = out_dir / f"{stem}.ogg"
+                if out.exists() and not args.force:
+                    continue
+                pending.append((voice, stem, text, tag, out))
+
+        print(f"{len(pending)} phrase clips, one call each on {MODEL}", flush=True)
+        failed = 0
+        for i, (voice, stem, text, tag, out) in enumerate(pending, 1):
+            time.sleep(CALL_SPACING_S)
+            try:
+                pcm, rate = call_with_backoff(text, voice, key, tag)
+                x = process(pcm, rate)
+                sf.write(str(out), x, TARGET_RATE, format="OGG", subtype="VORBIS")
+                print(f"  {i}/{len(pending)} ok {voice}/{out.name} [{tag}]", flush=True)
+            except Exception as exc:  # noqa: BLE001
+                failed += 1
+                print(f"  {i}/{len(pending)} FAIL {voice}/{out.name}: {exc}", flush=True)
+        print(f"done: {len(pending) - failed} ok, {failed} failed"
+              + (" — rerun to retry failures (existing clips are skipped)" if failed else ""), flush=True)
+        sys.exit(1 if failed else 0)
+
+    # ── Vocabulary: batched (short single words split cleanly on silence) ──────
+    items = [(stem, spoken_form(stem, text)) for stem, text in _vocabulary()]
+    takes = args.takes
 
     pending = []  # (voice, stem, text, out)
     for voice in args.voices:
@@ -231,8 +274,7 @@ def main() -> None:
         out_dir.mkdir(parents=True, exist_ok=True)
         for take in range(1, takes + 1):     # take-rounds OUTER: a word never
             for stem, text in items:          # repeats inside one batched call
-                name = f"{stem}-{take}.ogg" if not args.phrases else f"{stem}.ogg"
-                out = out_dir / name
+                out = out_dir / f"{stem}-{take}.ogg"
                 if out.exists() and not args.force:
                     continue
                 pending.append((voice, stem, text, out))

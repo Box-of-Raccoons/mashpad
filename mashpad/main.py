@@ -370,6 +370,10 @@ def main(argv=None) -> None:
             if app_settings.phrases and not menu.visible:
                 trigger = director.poll(now)
                 if trigger is not None:
+                    # BabyIDE speaks corporate-manager praise instead of the smash
+                    # "fun" line — same cadence/cooldown, just a different clip set.
+                    if app_settings.display_mode == "babyide" and trigger == "fun":
+                        trigger = "manager"
                     selector.on_trigger()
                     print(f"[mashpad] phrase: {trigger} ({selector.current() or 'default'})")
                     audio.play_phrase(trigger, rng, selector.current())
