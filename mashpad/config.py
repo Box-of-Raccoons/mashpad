@@ -125,6 +125,10 @@ PHRASE_DUCK_FADE_UP_S = 0.5
 # Uniform-random window (min, max spawns) between "fun" phrase re-arms.
 FUN_EVERY_SPAWNS = (250, 400)
 
+# BabyIDE fires far more often: the manager-speak IS the gag, and toddlers mash
+# fast, so a Smash-tuned 250-400 gap meant they'd never hear one. Much tighter.
+BABYIDE_FUN_EVERY_SPAWNS = (60, 120)
+
 # Live raccoon (image) items on screen that arm the "raccoons" phrase.
 RACCOON_PILE_N = 4
 

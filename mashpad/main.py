@@ -207,7 +207,12 @@ def main(argv=None) -> None:
         sequencer = melodies.MelodySequencer()
         bucket = TokenBucket(config.BUCKET_CAPACITY, config.BUCKET_REFILL_PER_S)
         splash = Splash(screen)
-        director = PhraseDirector(rng, pygame.time.get_ticks() / 1000.0)
+        director = PhraseDirector(
+            rng, pygame.time.get_ticks() / 1000.0,
+            fun_every=(config.BABYIDE_FUN_EVERY_SPAWNS
+                       if app_settings.display_mode == "babyide"
+                       else config.FUN_EVERY_SPAWNS),
+        )
         if splash.visible:
             director.note_splash(pygame.time.get_ticks() / 1000.0)
         clock = pygame.time.Clock()
@@ -368,6 +373,12 @@ def main(argv=None) -> None:
             # nothing else can be armed before the first input dismisses it. Rotate
             # the voice first (cycle mode) so the comment speaks in the new voice.
             if app_settings.phrases and not menu.visible:
+                # Keep the fun/manager cadence matched to the current mode (a
+                # Display toggle mid-session switches Smash <-> BabyIDE pacing).
+                director.set_fun_every(
+                    config.BABYIDE_FUN_EVERY_SPAWNS
+                    if app_settings.display_mode == "babyide"
+                    else config.FUN_EVERY_SPAWNS)
                 trigger = director.poll(now)
                 if trigger is not None:
                     # BabyIDE speaks corporate-manager praise instead of the smash

@@ -297,3 +297,37 @@ def test_manager_phrase_catalogue_populated():
     assert isinstance(manager, list), "phrases.json is missing the 'manager' list"
     assert len(manager) >= 10, f"expected >=10 manager sayings, got {len(manager)}"
     assert all(isinstance(s, str) and s.strip() for s in manager), "empty/non-string manager saying"
+
+
+# ---------------------------------------------------------------------------
+# fun_every window — BabyIDE fires the manager phrase far sooner than Smash, and
+# a mid-session Display toggle must re-pace immediately (not after the old gap).
+# ---------------------------------------------------------------------------
+
+def test_fun_every_window_is_honored():
+    # __init__ draws the first threshold from the supplied window.
+    d = PhraseDirector(FakeRNG(randints=[77]), 0.0, fun_every=(60, 120))
+    assert d.fun_every == (60, 120)
+    assert d._fun_threshold == 77
+
+
+def test_fun_every_defaults_to_config():
+    d = PhraseDirector(FakeRNG(), 0.0)
+    assert d.fun_every == config.FUN_EVERY_SPAWNS
+
+
+def test_set_fun_every_redraws_on_change_and_is_noop_when_same():
+    d = PhraseDirector(FakeRNG(randints=[300, 90]), 0.0, fun_every=(250, 400))
+    assert d._fun_threshold == 300
+    d.set_fun_every((60, 120))            # changed → re-draw (pops 90)
+    assert d.fun_every == (60, 120)
+    assert d._fun_threshold == 90
+    d.set_fun_every((60, 120))            # unchanged → no re-draw (no RNG needed)
+    assert d._fun_threshold == 90
+
+
+def test_babyide_fun_window_fires_sooner_than_smash():
+    lo_b, hi_b = config.BABYIDE_FUN_EVERY_SPAWNS
+    lo_s, _ = config.FUN_EVERY_SPAWNS
+    assert 1 <= lo_b <= hi_b, "BabyIDE fun window must be a sane (min<=max, >=1) range"
+    assert hi_b <= lo_s, "BabyIDE should fire strictly sooner than Smash"
