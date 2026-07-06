@@ -15,9 +15,12 @@ from pathlib import Path
 # Volume is an integer percentage; the menu steps it by 10.
 VOLUME_MIN = 0
 VOLUME_MAX = 100
-# The only accepted values for the two enum-like fields.
+# The only accepted values for the enum-like fields.
 LETTER_CASES = ("upper", "lower")
 RACCOON_AMOUNTS = ("less", "normal", "lots")
+# Effect layer on each spawn: "piano" steps through song melodies, "dings" plays
+# the classic random effect clips. Default piano (the MP-1 headline feature).
+SOUND_MODES = ("piano", "dings")
 # Voice-mode selection constants.
 VOICE_MODE_RANDOM = "random"
 VOICE_MODE_CYCLE = "cycle"
@@ -25,7 +28,7 @@ VOICE_MODE_CYCLE = "cycle"
 
 @dataclass
 class Settings:
-    """The four grown-up-tunable options, with baby-safe defaults."""
+    """The grown-up-tunable options, with baby-safe defaults."""
     # VOICE_MODE_RANDOM | VOICE_MODE_CYCLE | a specific voice-pack name.
     voice_mode: str = VOICE_MODE_RANDOM
     # Master volume 0–100 (UI steps by 10).
@@ -36,6 +39,8 @@ class Settings:
     raccoon_amount: str = "normal"
     # Whether the app occasionally speaks a reactive phrase (e.g. "slow down!").
     phrases: bool = True
+    # "piano" (song melodies) | "dings" (classic random effects) on each spawn.
+    sound_mode: str = "piano"
 
 
 def _from_dict(raw: dict) -> Settings:
@@ -69,6 +74,10 @@ def _from_dict(raw: dict) -> Settings:
     if isinstance(ph, bool):
         s.phrases = ph
 
+    sm = raw.get("sound_mode")
+    if sm in SOUND_MODES:
+        s.sound_mode = sm
+
     return s
 
 
@@ -100,6 +109,7 @@ def save(settings: Settings, path: Path) -> bool:
         "letter_case": settings.letter_case,
         "raccoon_amount": settings.raccoon_amount,
         "phrases": settings.phrases,
+        "sound_mode": settings.sound_mode,
     }
     try:
         with open(tmp, "w", encoding="utf-8") as fh:

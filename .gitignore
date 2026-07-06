@@ -3,9 +3,11 @@ __pycache__/
 .pytest_cache/
 # Grown-up options persist here at runtime — device-local, never committed.
 settings.json
-# Generated at install time by gen_voice.py / gen_effects.py — never committed.
+# Generated at install time by gen_voice.py / gen_effects.py / gen_notes.py —
+# never committed.
 sounds/voice/*.wav
 sounds/effects/*.wav
+sounds/notes/*.wav
 tools/node_modules/
 tools/raw/
 tools/stickers/

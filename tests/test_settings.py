@@ -17,6 +17,7 @@ def test_defaults():
     assert s.letter_case == "upper"
     assert s.raccoon_amount == "normal"
     assert s.phrases is True
+    assert s.sound_mode == "piano"
 
 
 # ---------------------------------------------------------------------------
@@ -46,7 +47,7 @@ def test_non_dict_json_returns_defaults(tmp_path):
 def test_roundtrip(tmp_path):
     p = tmp_path / "settings.json"
     s = Settings(voice_mode="puck", volume=50, letter_case="lower",
-                 raccoon_amount="lots", phrases=False)
+                 raccoon_amount="lots", phrases=False, sound_mode="dings")
     save(s, p)
     assert load(p) == s
 
@@ -56,7 +57,8 @@ def test_save_writes_all_keys(tmp_path):
     save(Settings(), p)
     data = json.loads(p.read_text(encoding="utf-8"))
     assert set(data) == {
-        "voice_mode", "volume", "letter_case", "raccoon_amount", "phrases"
+        "voice_mode", "volume", "letter_case", "raccoon_amount", "phrases",
+        "sound_mode",
     }
 
 
@@ -138,6 +140,31 @@ def test_phrases_non_bool_rejected(tmp_path):
     assert load(p).phrases is True
     p.write_text(json.dumps({"phrases": "off"}), encoding="utf-8")
     assert load(p).phrases is True
+
+
+# ---------------------------------------------------------------------------
+# sound_mode — piano | dings, else default
+# ---------------------------------------------------------------------------
+
+def test_sound_mode_accepted(tmp_path):
+    p = tmp_path / "settings.json"
+    p.write_text(json.dumps({"sound_mode": "dings"}), encoding="utf-8")
+    assert load(p).sound_mode == "dings"
+    p.write_text(json.dumps({"sound_mode": "piano"}), encoding="utf-8")
+    assert load(p).sound_mode == "piano"
+
+
+def test_sound_mode_invalid_defaults_to_piano(tmp_path):
+    p = tmp_path / "settings.json"
+    p.write_text(json.dumps({"sound_mode": "kazoo"}), encoding="utf-8")
+    assert load(p).sound_mode == "piano"
+
+
+def test_sound_mode_missing_defaults_to_piano(tmp_path):
+    # An older settings file written before this field existed → default piano.
+    p = tmp_path / "settings.json"
+    p.write_text(json.dumps({"volume": 50}), encoding="utf-8")
+    assert load(p).sound_mode == "piano"
 
 
 # ---------------------------------------------------------------------------

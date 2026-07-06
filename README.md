@@ -18,11 +18,14 @@ Add `--mute` to skip audio init when sound files haven't been generated yet.
 
 ## Generating sounds
 
-Before running without `--mute`, generate the two sound sets:
+Before running without `--mute`, generate the sound sets:
 
 ```sh
 # Synthesize pops, boings, dings, and chirps (numpy, no network required):
 python -m mashpad.gen_effects
+
+# Synthesize the piano-melody notes (xylophone tones, G4–C6; numpy, no network):
+python -m mashpad.gen_notes
 
 # Generate voice clips (requires piper or espeak-ng):
 python -m mashpad.gen_voice                    # piper (default, see below)
@@ -147,6 +150,7 @@ Ctrl+Alt+O again) to close the menu.
 | **Letters** | Render letters as **ABC** (uppercase) or **abc** (lowercase). |
 | **Raccoons** | How often a non-letter key spawns image art instead of a shape (when images are installed): **Less** (~25%), **Normal** (~50%), **Lots** (~75%). |
 | **Phrases** | **On/Off** — whether the app occasionally speaks a short reactive comment (see [Reactive phrases](#reactive-phrases)). |
+| **Sounds** | **Piano/Dings** — what plays on each keypress or click alongside the spoken name. **Piano** (default) steps through children's-song melodies (London Bridge, Twinkle Twinkle, Mary Had a Little Lamb, and more) — any key plays the next note, and finished songs roll into the next. **Dings** plays the classic random pops/boings/dings. Switching to Piano plays a sample note. |
 
 Every change is saved immediately (and again on close) to `settings.json` in the
 repo root. That file is device-local and git-ignored — deleting it restores the

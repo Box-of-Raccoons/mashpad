@@ -1,4 +1,4 @@
-# mashpad/audio.py — sound-clip loading + playback (voice packs + effects).
+# mashpad/audio.py — sound-clip loading + playback (voice packs + effects + notes).
 #
 # Degrades silently in every failure mode: --mute, mixer init failure, missing
 # sound directories, empty directories, or an unloadable clip. In silent mode all
@@ -37,6 +37,8 @@ class Audio:
         self._phrases: dict[str, dict[str, list[Path]]] = {}
         self._cache: dict[Path, "pygame.mixer.Sound | None"] = {}
         self._effects: list["pygame.mixer.Sound"] = []  # 8 small clips — eager
+        # note name ("c5") → Sound for piano-melody mode; 11 tiny WAVs, eager.
+        self._notes: dict[str, "pygame.mixer.Sound"] = {}
         self._master: float = 1.0  # 0.0–1.0, set by set_master_volume()
         self._duck = DuckWindow()  # non-phrase audio ducks while a phrase speaks
         # A phrase waiting for its scheduled start time: (Sound, start_seconds).
@@ -72,12 +74,18 @@ class Audio:
         """Set the master volume (0.0–1.0). Applied per-Sound at play time."""
         self._master = max(0.0, min(1.0, float(master)))
 
-    def play_for(self, spec, rng, voice=None) -> None:
-        """Play a random take of spec's spoken word in *voice*, plus a random effect.
+    def play_for(self, spec, rng, voice=None, note=None) -> None:
+        """Play a random take of spec's spoken word in *voice*, plus one effect.
+
+        The effect layer depends on *note*: when *note* is a note name (piano
+        mode) that note clip plays instead of a random ding; when *note* is None
+        (dings mode / menu auditions) a random effect plays. The voice-clip half
+        is identical either way.
 
         voice=None → use the "default" voice if present, else no voice clip (the
-        effect still plays). A voice name not among the loaded packs → no voice
-        clip. Voice clips play at master volume; effects at EFFECT_VOLUME × master.
+        note/effect still plays). A voice name not among the loaded packs → no
+        voice clip. Voice clips play at master volume; notes and effects at
+        EFFECT_VOLUME × master.
         """
         if not self._ok:
             return
@@ -90,10 +98,28 @@ class Audio:
                 if clip is not None:
                     clip.set_volume(self._master)
                     self._play(clip)
-        if self._effects:
+        if note is not None:
+            self.play_note(note)
+        elif self._effects:
             effect = rng.choice(self._effects)
             effect.set_volume(config.EFFECT_VOLUME * self._master)
             self._play(effect)
+
+    def play_note(self, name: str) -> None:
+        """Play the piano note clip *name* (e.g. 'c5') on a bed channel.
+
+        Plays at EFFECT_VOLUME × master (the effect layer's level) and ducks
+        under a speaking phrase like any other bed audio. Unknown name, no notes
+        loaded, or silent mode → no-op (the melody sequence still advanced
+        upstream; an occasional silent skip matches how effects behave).
+        """
+        if not self._ok:
+            return
+        sound = self._notes.get(name)
+        if sound is None:
+            return
+        sound.set_volume(config.EFFECT_VOLUME * self._master)
+        self._play(sound)
 
     def play_phrase(self, trigger: str, rng, voice=None) -> None:
         """Play a random 'phrase-<trigger>-*' clip in *voice*.
@@ -154,6 +180,7 @@ class Audio:
         root = paths.app_root()
         self._voice, self._phrases = self._load_voices(root / "sounds" / "voice")
         self._effects = self._load_effects(root / "sounds" / "effects")
+        self._notes = self._load_notes(root / "sounds" / "notes")
 
     def _load_voices(self, directory: Path):
         """Discover voice packs under *directory*.
@@ -232,6 +259,23 @@ class Audio:
             except Exception as exc:  # noqa: BLE001 — skip the bad file only
                 print(f"[mashpad audio] could not load {path.name}: {exc}")
         return effects
+
+    def _load_notes(self, directory: Path):
+        """Load every note clip under *directory* into {stem: Sound} (flat *.wav).
+
+        Eager like effects (11 tiny WAVs — negligible on the Pi). The stem is the
+        note name the sequencer emits ('c5'). Missing dir → empty dict, so piano
+        mode stays silent-safe on a checkout without generated notes.
+        """
+        notes: dict[str, "pygame.mixer.Sound"] = {}
+        if not directory.is_dir():
+            return notes
+        for path in sorted(directory.glob("*.ogg")) + sorted(directory.glob("*.wav")):
+            try:
+                notes[path.stem] = pygame.mixer.Sound(str(path))
+            except Exception as exc:  # noqa: BLE001 — skip the bad file only
+                print(f"[mashpad audio] could not load {path.name}: {exc}")
+        return notes
 
     @staticmethod
     def _split_word_take(stem: str):

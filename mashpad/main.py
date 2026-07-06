@@ -12,8 +12,8 @@ import random
 import pygame
 
 from mashpad import (
-    combos, config, imagepack, items, keymap, lockdown as lockdown_mod, paths,
-    render, settings as settings_mod,
+    combos, config, imagepack, items, keymap, lockdown as lockdown_mod,
+    melodies, paths, render, settings as settings_mod,
 )
 from mashpad.audio import Audio
 from mashpad.items import ItemField
@@ -69,11 +69,13 @@ def _char_for_event(event) -> str | None:
 
 def _spawn(field: ItemField, spec, pos, now: float, font, audio: Audio,
            selector: VoiceSelector, letter_case: str, director: PhraseDirector,
-           images=None) -> None:
+           images=None, note=None) -> None:
     """Register an item, build+cache its render surface once, and fire its audio.
 
     Every allowed spawn advances the voice selector, then plays the clip in the
     now-current voice (letters honour *letter_case* when their surface is built).
+    *note* (a note name in piano mode, None in dings mode) selects the effect
+    layer: a melody note vs. a random ding — see Audio.play_for.
     Also feeds the phrase director: if spawn force-faded a live item to enforce
     the MAX_ITEMS cap, arms 'screenfull'; the spawn itself — with the live image
     count — drives hello / fun / raccoons.
@@ -81,7 +83,7 @@ def _spawn(field: ItemField, spec, pos, now: float, font, audio: Audio,
     item, forced_fade = field.spawn(spec, pos, now)
     item.surface = render.build_item_surface(spec, font, images, letter_case=letter_case)
     selector.on_keystroke()
-    audio.play_for(spec, rng, voice=selector.current())
+    audio.play_for(spec, rng, voice=selector.current(), note=note)
     raccoons = sum(
         1 for i in field.items
         if i.state(now) != items.DEAD and i.spec.kind == "image"
@@ -189,6 +191,9 @@ def main(argv=None) -> None:
 
         field = ItemField()
         trail = Trail()
+        # Piano-mode melody sequencer: one note per allowed spawn, stepping
+        # through the song list. Only consulted when sound_mode == "piano".
+        sequencer = melodies.MelodySequencer()
         bucket = TokenBucket(config.BUCKET_CAPACITY, config.BUCKET_REFILL_PER_S)
         splash = Splash(screen)
         director = PhraseDirector(rng, pygame.time.get_ticks() / 1000.0)
@@ -248,8 +253,12 @@ def main(argv=None) -> None:
                     if bucket.try_take(now):
                         pos = (rng.uniform(half, width - half),
                                rng.uniform(half, height - half))
+                        # Advance the melody only on an allowed spawn (piano mode);
+                        # dings mode passes note=None → a random effect.
+                        note = (sequencer.next()
+                                if app_settings.sound_mode == "piano" else None)
                         _spawn(field, spec, pos, now, font, audio, selector,
-                               app_settings.letter_case, director, images)
+                               app_settings.letter_case, director, images, note)
                     else:
                         director.note_drop(now)
 
@@ -261,8 +270,11 @@ def main(argv=None) -> None:
                     image_weight = config.RACCOON_WEIGHTS.get(app_settings.raccoon_amount, config.RACCOON_WEIGHTS["normal"])
                     spec = keymap.item_for_key(None, rng, _extras, image_weight=image_weight)
                     if bucket.try_take(now):
+                        # Clicks advance the melody too (piano mode); see above.
+                        note = (sequencer.next()
+                                if app_settings.sound_mode == "piano" else None)
                         _spawn(field, spec, event.pos, now, font, audio, selector,
-                               app_settings.letter_case, director, images)
+                               app_settings.letter_case, director, images, note)
                     else:
                         director.note_drop(now)
 
