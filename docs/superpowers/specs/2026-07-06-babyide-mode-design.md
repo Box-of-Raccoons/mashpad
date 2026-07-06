@@ -63,7 +63,15 @@ key cannot dump the whole file instantly.
 Follows the app's pure-logic/pygame split (like `items.py`, `keymap.py`), so it
 is unit-testable without a display.
 
-- Holds a **curated, ordered list of Mashpad source files** to stream through.
+- Holds a **curated, ordered list of Mashpad source files** to stream through,
+  in **bottom-up dependency order**: pure-logic leaves first (`config`,
+  `settings`, `items`, `keymap`), then the pygame runtime (`render`, `audio`,
+  `menu`), then the entry points (`main`, `__main__`) last. This reads as
+  "foundations first, wiring last." It is an **explicit include-list, not a
+  glob** (a glob would drag in test files, the PyInstaller spec, and boilerplate)
+  — curation is deliberate. Files missing at runtime are **skipped gracefully**;
+  a test asserts every listed file exists so drift surfaces as a red test, not a
+  blank panel.
 - Each file is run through the stdlib **`tokenize`** module into a flat sequence
   of print-tokens. Each print-token carries:
   - `text` — the token's source text.
@@ -121,6 +129,27 @@ when `codetext` reports a file change. The only IDE chrome.
   Draw order per frame: background → code panel → raccoon items (fading, drawn on
   top) → tab bar → menu/splash overlay → flip.
 
+### 5. Resume position (persistence)
+
+So the stream picks up where it left off instead of restarting from
+`config.py` line 1 every launch — otherwise short toddler sessions would loop
+the same opening foundation files forever and never advance through the
+codebase.
+
+- Persist a small cursor: **`(filename, token_index)`** — storing the *filename*
+  (not just a list index) so reordering the file list can't resume mid-wrong-
+  file.
+- **Checkpoint periodically** (every ~20 printed tokens), **not** only on exit:
+  the Pi kiosk is typically powered off, not quit, so save-on-exit would lose
+  the spot almost every session. Also save on graceful shutdown when it happens.
+- **Validate on load:** if the saved filename is no longer in the list, reset to
+  the start; if the file exists but its content changed so `token_index` is out
+  of range, clamp to the top of that file. A stale saved position never crashes
+  or blanks the panel.
+- **Storage:** a small persisted state value alongside `settings.json`, reusing
+  the same JSON load/save pattern (kept conceptually separate from user
+  *preferences* — this is ephemeral progress, not a setting).
+
 ## Data flow (per keypress, BabyIDE mode)
 
 ```
@@ -144,7 +173,11 @@ per frame:
 
 - **`codetext`:** token categories map to expected colors; exactly one token per
   `next()`; EOF advances to the next file and reports the new filename; loops
-  after the last file; whitespace/newline handling.
+  after the last file; whitespace/newline handling; **every file in the curated
+  list exists** (drift guard); a missing file is skipped, not fatal.
+- **resume:** checkpoint round-trips `(filename, token_index)`; load with an
+  unknown filename resets to start; load with an out-of-range `token_index`
+  clamps to the top of that file.
 - **`codepanel`** (pure layout): cursor advance, soft-wrap on overflow, scroll
   trigger when content exceeds panel height.
 - **`settings`:** `display_mode` validation (rejects unknown values, defaults to
@@ -156,6 +189,7 @@ per frame:
 - Code font size: **~48px**.
 - Per-keypress raccoon probability (tuned against the existing "Raccoons"
   amount setting).
+- Resume checkpoint interval: **~20 tokens**.
 
 ## Risks / notes
 
