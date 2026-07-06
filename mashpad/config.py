@@ -149,3 +149,25 @@ MIXER_FREQUENCY_HZ = 44100
 
 # Mixer buffer size; raise if a device crackles/underruns (Pi tuning knob).
 MIXER_BUFFER_SAMPLES = 2048
+
+# BabyIDE: point size of the scrolling code font (a readable slice, not the 280px item glyph).
+BABYIDE_FONT_PX = 48
+
+# BabyIDE: filename (under data_dir()) where the resume cursor persists.
+BABYIDE_STATE_FILE = "babyide_state.json"
+
+# BabyIDE: checkpoint the resume cursor every N printed tokens (the Pi is usually powered off, not quit).
+BABYIDE_CHECKPOINT_TOKENS = 20
+
+# BabyIDE: probability a keypress also pops one fading raccoon over the editor.
+BABYIDE_RACCOON_CHANCE = 0.15
+
+# BabyIDE: token category -> RGB color for syntax highlighting (categories emitted by codetext.py).
+BABYIDE_TOKEN_COLORS = {
+    "keyword": (255,   0, 128),  # rose
+    "string":  (128, 255,   0),  # chartreuse
+    "comment": (120, 170, 120),  # muted green
+    "number":  (255, 128,   0),  # orange
+    "name":    (235, 235, 245),  # near-white default
+    "op":      (  0, 255, 255),  # cyan
+}
