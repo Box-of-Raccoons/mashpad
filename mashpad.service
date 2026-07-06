@@ -1,15 +1,25 @@
 [Unit]
 Description=mashpad — baby keyboard smasher
-After=systemd-user-sessions.service sound.target
+After=systemd-user-sessions.service sound.target seatd.service
+Wants=seatd.service
 Conflicts=getty@tty1.service
 
 [Service]
 User=@USER@
+# The 'video' group is double duty here: GPU/DRM access AND the seatd socket
+# (Debian runs 'seatd -g video', so /run/seatd.sock is group-video). That lets
+# cage acquire its seat (DRM + VT) as this non-root user.
 SupplementaryGroups=video input audio render tty
 WorkingDirectory=@REPO@
 Environment=PYTHONPATH=@REPO@
-Environment=SDL_VIDEODRIVER=kmsdrm
-ExecStart=/usr/bin/python3 -m mashpad
+# cage is a single-app Wayland kiosk. mashpad renders inside it (via XWayland,
+# SDL driver "x11") because SDL's bare kmsdrm backend does not present on the
+# Pi's split-GPU (v3d renders, vc4 scans out). SDL_VIDEODRIVER is left UNSET on
+# purpose — under cage, SDL's default selection is the path that renders.
+Environment=XDG_RUNTIME_DIR=/run/mashpad
+RuntimeDirectory=mashpad
+RuntimeDirectoryMode=0700
+ExecStart=/usr/bin/cage -- /usr/bin/python3 -m mashpad
 Restart=always
 RestartSec=2
 TTYPath=/dev/tty1

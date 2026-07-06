@@ -37,11 +37,30 @@ fi
 echo "[install] Installing system packages..."
 # --no-install-recommends: espeak-ng's recommends can pull in speech-dispatcher
 # (sd_espeak-ng), a console screen reader that speaks tty text over the app.
-if ! apt-get install -y --no-install-recommends python3-pygame python3-numpy espeak-ng alsa-utils; then
+#
+# Package roles beyond pygame/numpy/espeak/alsa:
+#   libgl1-mesa-dri libegl1 libgles2 — the Mesa EGL/GLES userspace + the v3d DRI
+#     driver. A bare Pi OS Lite image ships none of these (the text console uses
+#     the kernel framebuffer directly), so without them SDL's kmsdrm/GL init dies
+#     with "EGL not initialized" and mashpad crash-loops on a blank screen.
+#   cage  — a single-app Wayland kiosk. mashpad runs INSIDE it: SDL's bare kmsdrm
+#     backend does not present on the Pi 4's split GPU (v3d renders, vc4 scans
+#     out), so the app renders black. cage drives the GL/scanout path correctly.
+#   seatd — seat manager. cage (via libseat) needs a seat for DRM + VT access;
+#     from a systemd system service there is no logind session, so seatd provides
+#     it. Debian runs 'seatd -g video', so the socket is group-video and the
+#     existing 'video' membership in the unit is all cage needs — no extra group.
+if ! apt-get install -y --no-install-recommends \
+        python3-pygame python3-numpy espeak-ng alsa-utils \
+        libgl1-mesa-dri libegl1 libgles2 cage seatd; then
     echo "[install] ERROR: apt-get failed. Are you running as root (sudo bash install.sh)?"
     exit 1
 fi
 echo "[install] System packages installed."
+
+echo "[install] Enabling seatd (seat manager for the cage kiosk)..."
+systemctl enable --now seatd || \
+    echo "[install] WARNING: could not enable seatd — mashpad may fail to acquire a seat."
 
 # ── 2. piper-tts (optional — espeak is the fallback) ─────────────────────────
 
@@ -118,6 +137,33 @@ else
         echo "          Run manually: cd ${REPO_DIR} && python3 -m mashpad.gen_voice --engine espeak"
     fi
 fi
+
+# ── 5.5 Preflight: the runtime deps mashpad needs to actually render ──────────
+#
+# The original failure mode this guards against: a bare Pi OS Lite install would
+# happily set up the service, then hand the user a black screen and a silent
+# crash-loop because the GL/EGL userspace and the cage kiosk were never present.
+# Fail loudly HERE, with the fix, instead of at boot with no hint.
+
+echo "[install] Verifying display runtime prerequisites..."
+PREFLIGHT_OK=1
+for bin in cage seatd; do
+    if ! command -v "${bin}" >/dev/null 2>&1; then
+        echo "[install] ERROR: '${bin}' is not installed — the kiosk cannot start without it."
+        PREFLIGHT_OK=0
+    fi
+done
+if ! ldconfig -p 2>/dev/null | grep -q 'libEGL\.so\.1'; then
+    echo "[install] ERROR: libEGL.so.1 not found — SDL/GL init will fail with 'EGL not initialized'."
+    echo "          Install it with: apt-get install libgl1-mesa-dri libegl1 libgles2"
+    PREFLIGHT_OK=0
+fi
+if [ "${PREFLIGHT_OK}" != "1" ]; then
+    echo "[install] ERROR: display prerequisites are missing (see above). Aborting before"
+    echo "          enabling the service so you don't boot into a blank screen."
+    exit 1
+fi
+echo "[install] Display prerequisites present (cage, seatd, libEGL)."
 
 # ── 6. Install and enable the systemd service ─────────────────────────────────
 
