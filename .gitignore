@@ -17,3 +17,5 @@ tools/package*.json
 packaging/build/
 packaging/dist/
 packaging/out/
+# Playwright-MCP session artifacts (console/page dumps) — never committed.
+.playwright-mcp/
