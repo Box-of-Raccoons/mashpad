@@ -4,5 +4,5 @@
 # Then pip-install only the remaining packages from this file.
 
 pytest>=7.4
-pygame>=2.5     # runtime dep; on Pi use apt python3-pygame
+pygame-ce>=2.5  # runtime dep (CE fork the app is verified against; same `import pygame`); on Pi use apt python3-pygame
 numpy>=1.24     # used by gen_effects.py; on Pi use apt python3-numpy
