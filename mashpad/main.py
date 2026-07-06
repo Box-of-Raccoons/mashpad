@@ -12,7 +12,7 @@ import random
 import pygame
 
 from mashpad import (
-    config, imagepack, items, keymap, lockdown as lockdown_mod, paths,
+    combos, config, imagepack, items, keymap, lockdown as lockdown_mod, paths,
     render, settings as settings_mod,
 )
 from mashpad.audio import Audio
@@ -212,16 +212,13 @@ def main(argv=None) -> None:
                 splash.dismiss()
 
             if event.type == pygame.KEYDOWN:
-                # Grown-up exit combo: Ctrl+Alt+Q.
-                if (event.key == pygame.K_q
-                        and event.mod & pygame.KMOD_CTRL
-                        and event.mod & pygame.KMOD_ALT):
+                # Grown-up combos (AltGr-safe; see mashpad.combos). Ctrl+left-Alt
+                # +Q quits, Ctrl+left-Alt+O opens the options menu.
+                combo = combos.grown_up_combo(event)
+                if combo == combos.QUIT:
                     running = False
                     continue
-                # Grown-up options combo: Ctrl+Alt+O.
-                if (event.key == pygame.K_o
-                        and event.mod & pygame.KMOD_CTRL
-                        and event.mod & pygame.KMOD_ALT):
+                if combo == combos.OPTIONS:
                     menu_open_voice_mode = app_settings.voice_mode
                     menu.open()
                     continue

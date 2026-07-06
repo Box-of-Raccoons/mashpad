@@ -28,3 +28,28 @@ def test_lockdown_stop_before_start_is_safe():
     lock = lockdown.Lockdown()
     lock.stop()
     assert lock.active is False
+
+
+def test_lockdown_saved_access_starts_empty():
+    # No accessibility shortcuts have been suppressed on a fresh instance.
+    lock = lockdown.Lockdown()
+    assert lock._saved_access == {}
+
+
+def test_restore_accessibility_is_safe_with_nothing_saved():
+    # With an empty save-set, restore is a pure no-op on ANY platform: it must
+    # never touch ctypes / SystemParametersInfo (so it can't change the dev
+    # machine's settings) and must leave the save-set empty.
+    lock = lockdown.Lockdown()
+    lock._restore_accessibility_shortcuts()
+    assert lock._saved_access == {}
+
+
+def test_stop_is_idempotent_and_clears_saved_access():
+    # stop() called repeatedly (never started) stays a safe no-op and the
+    # restore path leaves nothing saved behind.
+    lock = lockdown.Lockdown()
+    lock.stop()
+    lock.stop()
+    assert lock.active is False
+    assert lock._saved_access == {}

@@ -12,7 +12,7 @@ import random
 import pygame
 
 import mashpad
-from mashpad import config, paths, settings as settings_mod
+from mashpad import combos, config, paths, settings as settings_mod
 
 # Menu font size (px) — a couch-readable slice of the item glyph font.
 MENU_FONT_PX = 48
@@ -77,13 +77,19 @@ class Menu:
             return None
 
         key = event.key
-        mod = event.mod
 
-        # Close: Esc, or the same Ctrl+Alt+O that opened it.
-        if key == pygame.K_ESCAPE:
+        # Grown-up combos while the menu is open (AltGr-safe; shared helper).
+        # Ctrl+Alt+Q must still quit — main.py routes ALL events here while the
+        # menu is up, so without this the documented quit combo would be dead.
+        combo = combos.grown_up_combo(event)
+        if combo == combos.QUIT:
+            return "quit"
+        if combo == combos.OPTIONS:  # same Ctrl+Alt+O that opened it → close
             self.close()
             return None
-        if key == pygame.K_o and (mod & pygame.KMOD_CTRL) and (mod & pygame.KMOD_ALT):
+
+        # Close: Esc.
+        if key == pygame.K_ESCAPE:
             self.close()
             return None
 
