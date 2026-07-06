@@ -171,3 +171,6 @@ BABYIDE_TOKEN_COLORS = {
     "name":    (235, 235, 245),  # near-white default
     "op":      (  0, 255, 255),  # cyan
 }
+
+# BabyIDE: point size of the fake editor tab showing the current filename.
+BABYIDE_TAB_FONT_PX = 32
