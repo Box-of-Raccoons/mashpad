@@ -27,7 +27,7 @@ _PRIORITY = ("hello", "slowdown", "screenfull", "raccoons", "fun")
 class PhraseDirector:
     """Arms and fires phrase triggers, honouring cooldowns and a chance flip."""
 
-    def __init__(self, rng, now: float) -> None:  # now param kept for call-site compat; not stored
+    def __init__(self, rng, now: float, fun_every=None) -> None:  # now kept for call-site compat; not stored
         self._rng = rng
         # Armed triggers: {trigger: armed_time}.  Re-arming refreshes the time.
         self._pending: dict[str, float] = {}
@@ -35,15 +35,28 @@ class PhraseDirector:
         self._last_fired: dict[str, float] = {}   # per-trigger last-fired time
         # slowdown: recent rate-limiter drop timestamps, trimmed to the window.
         self._drop_times: list[float] = []
-        # fun: spawn counter + the random threshold it must pass to arm.
+        # fun: spawn counter + the random threshold it must pass to arm. The
+        # (min, max) window is settable at runtime — BabyIDE fires much sooner
+        # than Smash (see config.*_FUN_EVERY_SPAWNS); the next re-draw picks it up.
+        self.fun_every = fun_every or config.FUN_EVERY_SPAWNS
         self._spawn_count = 0
         self._fun_threshold = self._draw_fun()
         # hello: when did the last spawn happen (drives the idle re-greet).
         self._last_spawn_time = None
 
     def _draw_fun(self) -> int:
-        lo, hi = config.FUN_EVERY_SPAWNS
+        lo, hi = self.fun_every
         return self._rng.randint(lo, hi)
+
+    def set_fun_every(self, window) -> None:
+        """Switch the fun re-arm window (Smash vs BabyIDE) at runtime. Re-draws
+        the pending threshold so a mid-session Display toggle takes effect on the
+        next spawn instead of after the old (possibly much larger) one. No-op if
+        the window is unchanged, so it is cheap to call every frame."""
+        if tuple(window) == tuple(self.fun_every):
+            return
+        self.fun_every = window
+        self._fun_threshold = self._draw_fun()
 
     # ---------------------------------------------------------------- feed-ins
 

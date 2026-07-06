@@ -12,8 +12,8 @@ import random
 import pygame
 
 from mashpad import (
-    combos, config, imagepack, items, keymap, lockdown as lockdown_mod,
-    melodies, paths, render, settings as settings_mod,
+    codepanel, codetext, combos, config, imagepack, items, keymap,
+    lockdown as lockdown_mod, melodies, paths, render, settings as settings_mod,
 )
 from mashpad.audio import Audio
 from mashpad.items import ItemField
@@ -65,6 +65,16 @@ def _char_for_event(event) -> str | None:
         if ("a" <= lo <= "z") or ("0" <= u <= "9"):
             return u
     return None
+
+
+def _draw_babyide_tab(screen, font, tab_h: int, width: int, filename: str) -> None:
+    """Draw the fake editor tab bar (a filename chip) across the top."""
+    pygame.draw.rect(screen, (30, 30, 42), (0, 0, width, tab_h))
+    label = font.render(filename or "", True, (235, 235, 245))
+    chip_w = label.get_width() + 40
+    pygame.draw.rect(screen, (52, 52, 70), (0, 0, chip_w, tab_h))
+    pygame.draw.rect(screen, (120, 170, 120), (0, tab_h - 4, chip_w, 4))  # accent underline
+    screen.blit(label, (20, (tab_h - label.get_height()) // 2))
 
 
 def _spawn(field: ItemField, spec, pos, now: float, font, audio: Audio,
@@ -136,6 +146,7 @@ def main(argv=None) -> None:
     # Ctrl+Alt+Del is reserved by the OS and is never affected. Torn down before
     # pygame.quit() at shutdown.
     lock = lockdown_mod.Lockdown()
+    code_stream = None  # bound below in babyide setup; referenced in finally
     try:
         if args.windowed is None and not args.no_lockdown:
             lock.start()
@@ -196,13 +207,39 @@ def main(argv=None) -> None:
         sequencer = melodies.MelodySequencer()
         bucket = TokenBucket(config.BUCKET_CAPACITY, config.BUCKET_REFILL_PER_S)
         splash = Splash(screen)
-        director = PhraseDirector(rng, pygame.time.get_ticks() / 1000.0)
+        director = PhraseDirector(
+            rng, pygame.time.get_ticks() / 1000.0,
+            fun_every=(config.BABYIDE_FUN_EVERY_SPAWNS
+                       if app_settings.display_mode == "babyide"
+                       else config.FUN_EVERY_SPAWNS),
+        )
         if splash.visible:
             director.note_splash(pygame.time.get_ticks() / 1000.0)
         clock = pygame.time.Clock()
 
         width, height = screen.get_size()
         half = config.ITEM_SIZE_PX / 2.0  # keep keyboard spawns fully on-screen
+
+        # BabyIDE mode: source token stream (resumed from the saved cursor) + a
+        # scrolling code panel below a filename tab. Built once; only used when
+        # display_mode == "babyide".
+        babyide_state_path = paths.data_dir() / config.BABYIDE_STATE_FILE
+        tab_font = pygame.font.Font(str(font_path), config.BABYIDE_TAB_FONT_PX)
+        tab_h = tab_font.get_linesize() + 16
+
+        def _read_source(name):
+            return (paths.source_dir() / name).read_text(encoding="utf-8")
+
+        code_stream = codetext.CodeStream(
+            codetext.SOURCE_FILES, _read_source,
+            position=codetext.load_position(babyide_state_path),
+        )
+        code_panel = codepanel.CodePanel(
+            (0, tab_h, width, height - tab_h),
+            font_path, config.BABYIDE_FONT_PX, config.BABYIDE_TOKEN_COLORS,
+            config.BOUNCE_S, config.BOUNCE_OVERSHOOT,
+        )
+        babyide_tokens_since_save = 0
 
         running = True
         while running:
@@ -246,6 +283,53 @@ def main(argv=None) -> None:
                         menu_open_voice_mode = app_settings.voice_mode
                         menu.open()
                         continue
+                    if app_settings.display_mode == "babyide":
+                        # Speak the pressed key + tone (same audio decision as
+                        # smash) but print the next SOURCE token instead of a
+                        # giant glyph; pop the odd fading raccoon over the editor.
+                        image_weight = config.RACCOON_WEIGHTS.get(
+                            app_settings.raccoon_amount, config.RACCOON_WEIGHTS["normal"])
+                        if bucket.try_take(now):
+                            key_spec = keymap.item_for_key(
+                                _char_for_event(event), rng, _extras, image_weight=image_weight)
+                            note = (sequencer.next()
+                                    if app_settings.sound_mode == "piano" else None)
+                            selector.on_keystroke()
+                            audio.play_for(key_spec, rng, voice=selector.current(), note=note)
+                            # Reveal a small burst of tokens per keypress so whole
+                            # lines fill in and the panel scrolls at a fun pace,
+                            # instead of crawling one token at a time. Only the last
+                            # of the burst carries the bounce (newest wins).
+                            chunk = rng.randint(
+                                config.BABYIDE_TOKENS_PER_KEY_MIN,
+                                config.BABYIDE_TOKENS_PER_KEY_MAX)
+                            burst = codetext.take(code_stream, chunk)
+                            for token in burst:
+                                code_panel.append(token, now)
+                            emitted = len(burst)
+                            raccoons = sum(
+                                1 for i in field.items
+                                if i.state(now) != items.DEAD and i.spec.kind == "image"
+                            )
+                            director.note_spawn(now, raccoons)
+                            # Occasionally pop one fading raccoon over the editor.
+                            if _extras and rng.random() < config.BABYIDE_RACCOON_CHANCE:
+                                rspec = keymap.item_for_key(None, rng, _extras, image_weight=1.0)
+                                if rspec.kind == "image":
+                                    rpos = (rng.uniform(half, width - half),
+                                            rng.uniform(half, height - half))
+                                    ritem, forced = field.spawn(rspec, rpos, now)
+                                    ritem.surface = render.build_item_surface(
+                                        rspec, font, images, letter_case=app_settings.letter_case)
+                                    if forced:
+                                        director.note_cap_hit(now)
+                            babyide_tokens_since_save += emitted
+                            if babyide_tokens_since_save >= config.BABYIDE_CHECKPOINT_TOKENS:
+                                codetext.save_position(code_stream.position(), babyide_state_path)
+                                babyide_tokens_since_save = 0
+                        else:
+                            director.note_drop(now)
+                        continue
                     image_weight = config.RACCOON_WEIGHTS.get(app_settings.raccoon_amount, config.RACCOON_WEIGHTS["normal"])
                     spec = keymap.item_for_key(
                         _char_for_event(event), rng, _extras, image_weight=image_weight
@@ -266,6 +350,8 @@ def main(argv=None) -> None:
                     trail.add(event.pos, now)
 
                 elif event.type == pygame.MOUSEBUTTONDOWN:
+                    if app_settings.display_mode == "babyide":
+                        continue  # BabyIDE is a key smasher; ignore clicks
                     # Click → shape at the cursor, through the SAME rate-limit bucket.
                     image_weight = config.RACCOON_WEIGHTS.get(app_settings.raccoon_amount, config.RACCOON_WEIGHTS["normal"])
                     spec = keymap.item_for_key(None, rng, _extras, image_weight=image_weight)
@@ -287,16 +373,32 @@ def main(argv=None) -> None:
             # nothing else can be armed before the first input dismisses it. Rotate
             # the voice first (cycle mode) so the comment speaks in the new voice.
             if app_settings.phrases and not menu.visible:
+                # Keep the fun/manager cadence matched to the current mode (a
+                # Display toggle mid-session switches Smash <-> BabyIDE pacing).
+                director.set_fun_every(
+                    config.BABYIDE_FUN_EVERY_SPAWNS
+                    if app_settings.display_mode == "babyide"
+                    else config.FUN_EVERY_SPAWNS)
                 trigger = director.poll(now)
                 if trigger is not None:
+                    # BabyIDE speaks corporate-manager praise instead of the smash
+                    # "fun" line — same cadence/cooldown, just a different clip set.
+                    if app_settings.display_mode == "babyide" and trigger == "fun":
+                        trigger = "manager"
                     selector.on_trigger()
                     print(f"[mashpad] phrase: {trigger} ({selector.current() or 'default'})")
                     audio.play_phrase(trigger, rng, selector.current())
 
             screen.fill(render.BACKGROUND)
-            for item in field.items:          # oldest → newest
-                render.draw_item(screen, item, now)
-            render.draw_trail(screen, trail, now)
+            if app_settings.display_mode == "babyide":
+                code_panel.draw(screen, now)          # persistent scrolling code
+                for item in field.items:              # raccoons fading, over code
+                    render.draw_item(screen, item, now)
+                _draw_babyide_tab(screen, tab_font, tab_h, width, code_stream.current_file)
+            else:
+                for item in field.items:              # oldest → newest
+                    render.draw_item(screen, item, now)
+                render.draw_trail(screen, trail, now)
             menu.draw(screen)                 # overlay on top when visible
             splash.draw(screen, now)          # startup splash, above everything
             pygame.display.flip()
@@ -304,5 +406,11 @@ def main(argv=None) -> None:
             clock.tick(config.FPS)
 
     finally:
+        if code_stream is not None:  # best-effort save the resume cursor
+            try:
+                codetext.save_position(code_stream.position(),
+                                       paths.data_dir() / config.BABYIDE_STATE_FILE)
+            except Exception:  # noqa: BLE001 — shutdown must never raise
+                pass
         lock.stop()  # remove the keyboard hook (no-op if it was never installed)
         pygame.quit()

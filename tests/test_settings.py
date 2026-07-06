@@ -18,6 +18,7 @@ def test_defaults():
     assert s.raccoon_amount == "normal"
     assert s.phrases is True
     assert s.sound_mode == "piano"
+    assert s.display_mode == "smash"
 
 
 # ---------------------------------------------------------------------------
@@ -58,7 +59,7 @@ def test_save_writes_all_keys(tmp_path):
     data = json.loads(p.read_text(encoding="utf-8"))
     assert set(data) == {
         "voice_mode", "volume", "letter_case", "raccoon_amount", "phrases",
-        "sound_mode",
+        "sound_mode", "display_mode",
     }
 
 
@@ -165,6 +166,30 @@ def test_sound_mode_missing_defaults_to_piano(tmp_path):
     p = tmp_path / "settings.json"
     p.write_text(json.dumps({"volume": 50}), encoding="utf-8")
     assert load(p).sound_mode == "piano"
+
+
+# ---------------------------------------------------------------------------
+# display_mode — smash | babyide, else default
+# ---------------------------------------------------------------------------
+
+def test_display_mode_accepted(tmp_path):
+    p = tmp_path / "settings.json"
+    p.write_text(json.dumps({"display_mode": "babyide"}), encoding="utf-8")
+    assert load(p).display_mode == "babyide"
+    p.write_text(json.dumps({"display_mode": "smash"}), encoding="utf-8")
+    assert load(p).display_mode == "smash"
+
+
+def test_display_mode_invalid_defaults_to_smash(tmp_path):
+    p = tmp_path / "settings.json"
+    p.write_text(json.dumps({"display_mode": "hologram"}), encoding="utf-8")
+    assert load(p).display_mode == "smash"
+
+
+def test_display_mode_missing_defaults_to_smash(tmp_path):
+    p = tmp_path / "settings.json"
+    p.write_text(json.dumps({"volume": 50}), encoding="utf-8")
+    assert load(p).display_mode == "smash"
 
 
 # ---------------------------------------------------------------------------
