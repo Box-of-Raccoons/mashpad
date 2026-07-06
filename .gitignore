@@ -3,6 +3,8 @@ __pycache__/
 .pytest_cache/
 # Grown-up options persist here at runtime — device-local, never committed.
 settings.json
+# BabyIDE resume cursor persists here at runtime — device-local, never committed.
+babyide_state.json
 # Generated at install time by gen_voice.py / gen_effects.py / gen_notes.py —
 # never committed.
 sounds/voice/*.wav

@@ -153,6 +153,13 @@ MIXER_BUFFER_SAMPLES = 2048
 # BabyIDE: point size of the scrolling code font (a readable slice, not the 280px item glyph).
 BABYIDE_FONT_PX = 48
 
+# BabyIDE: tokens revealed per keypress. One-per-press made whole lines crawl in
+# a keypress at a time; a small random burst fills lines and scrolls at a fun
+# pace. Inclusive range — set both equal for a fixed count. The TokenBucket still
+# rate-limits *keypresses*, so this scales how much each allowed press reveals.
+BABYIDE_TOKENS_PER_KEY_MIN = 2
+BABYIDE_TOKENS_PER_KEY_MAX = 10
+
 # BabyIDE: filename (under data_dir()) where the resume cursor persists.
 BABYIDE_STATE_FILE = "babyide_state.json"
 

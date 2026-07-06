@@ -65,9 +65,22 @@ def tokenize_source(source: str) -> list[Token]:
         for tk in _tok.generate_tokens(io.StringIO(source).readline):
             if tk.type in _STRUCTURAL or not tk.string:
                 continue
-            tokens.append(
-                Token(tk.string, _category(tk.type, tk.string), tk.start[0], tk.start[1])
-            )
+            category = _category(tk.type, tk.string)
+            start_row, start_col = tk.start
+            if "\n" in tk.string:
+                # A token spanning several source lines (e.g. a triple-quoted
+                # string / docstring) must become one Token per physical line —
+                # the panel reserves a single line_height per Token, so a tall
+                # multi-line glyph would otherwise stack over the lines below it.
+                # Continuation lines carry their own leading whitespace in the
+                # text, so their col is 0. Blank lines collapse.
+                for k, line in enumerate(tk.string.split("\n")):
+                    if not line:
+                        continue
+                    col = start_col if k == 0 else 0
+                    tokens.append(Token(line, category, start_row + k, col))
+            else:
+                tokens.append(Token(tk.string, category, start_row, start_col))
     except Exception as exc:  # noqa: BLE001 — a weird file must not crash BabyIDE
         print(f"[mashpad babyide] tokenize stopped early: {exc}")
     return tokens
@@ -208,6 +221,22 @@ class CodeStream:
         self._tok_idx += 1
         self._normalize()
         return token
+
+
+def take(stream: CodeStream, count: int) -> list[Token]:
+    """Emit up to *count* tokens from *stream*, advancing its cursor.
+
+    BabyIDE reveals a burst of tokens per keypress (not just one) so lines fill
+    and the panel scrolls at a fun pace. Returns fewer than *count* only when the
+    stream is exhausted (every source file empty/unreadable, so ``next()`` yields
+    ``None``); a non-positive *count* yields ``[]``. Never loops forever."""
+    out: list[Token] = []
+    for _ in range(max(0, count)):
+        token = stream.next()
+        if token is None:
+            break
+        out.append(token)
+    return out
 
 
 # ---------------------------------------------------------------------------

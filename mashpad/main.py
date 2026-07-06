@@ -291,9 +291,17 @@ def main(argv=None) -> None:
                                     if app_settings.sound_mode == "piano" else None)
                             selector.on_keystroke()
                             audio.play_for(key_spec, rng, voice=selector.current(), note=note)
-                            token = code_stream.next()
-                            if token is not None:
+                            # Reveal a small burst of tokens per keypress so whole
+                            # lines fill in and the panel scrolls at a fun pace,
+                            # instead of crawling one token at a time. Only the last
+                            # of the burst carries the bounce (newest wins).
+                            chunk = rng.randint(
+                                config.BABYIDE_TOKENS_PER_KEY_MIN,
+                                config.BABYIDE_TOKENS_PER_KEY_MAX)
+                            burst = codetext.take(code_stream, chunk)
+                            for token in burst:
                                 code_panel.append(token, now)
+                            emitted = len(burst)
                             raccoons = sum(
                                 1 for i in field.items
                                 if i.state(now) != items.DEAD and i.spec.kind == "image"
@@ -310,7 +318,7 @@ def main(argv=None) -> None:
                                         rspec, font, images, letter_case=app_settings.letter_case)
                                     if forced:
                                         director.note_cap_hit(now)
-                            babyide_tokens_since_save += 1
+                            babyide_tokens_since_save += emitted
                             if babyide_tokens_since_save >= config.BABYIDE_CHECKPOINT_TOKENS:
                                 codetext.save_position(code_stream.position(), babyide_state_path)
                                 babyide_tokens_since_save = 0

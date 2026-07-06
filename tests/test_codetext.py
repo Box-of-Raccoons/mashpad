@@ -12,6 +12,7 @@ from mashpad.codetext import (
     color_for,
     load_position,
     save_position,
+    take,
     tokenize_source,
 )
 
@@ -62,6 +63,24 @@ def test_tokenize_source_categories():
     assert "42" in texts
     # Comment
     assert "# hi" in texts
+
+
+def test_multiline_string_splits_into_per_line_tokens():
+    # A triple-quoted docstring is ONE tokenize token spanning several source
+    # lines. It must be split into one Token per physical line, else the code
+    # panel (which reserves one line_height per token) stacks the tall glyph
+    # over the lines below it. Regression: the BabyIDE "text overlapping" bug.
+    src = 'def f():\n    """line one\n    line two\n    line three"""\n    return 1\n'
+    toks = tokenize_source(src)
+    # No token may contain a newline — each Token is exactly one visual line.
+    offenders = [t.text for t in toks if "\n" in t.text]
+    assert not offenders, f"tokens still contain newlines: {offenders}"
+    # The three docstring lines become three separate string-category tokens
+    # on consecutive, increasing rows.
+    string_toks = [t for t in toks if t.category == "string"]
+    assert len(string_toks) == 3
+    rows = [t.row for t in string_toks]
+    assert rows == sorted(rows) and len(set(rows)) == 3
 
 
 # ---------------------------------------------------------------------------
@@ -281,6 +300,40 @@ def test_resume_out_of_range_clamps_to_zero():
     expected = tokenize_source("x = 1\n")[0]
     assert tok is not None
     assert tok.text == expected.text
+
+
+# ---------------------------------------------------------------------------
+# take() — the per-keypress burst (BabyIDE reveals 2-10 tokens per press)
+# ---------------------------------------------------------------------------
+
+def test_take_returns_count_in_order_and_advances():
+    stream = CodeStream(["a.py", "b.py"], _reader(_SIMPLE_SOURCES))
+    first = take(stream, 2)
+    assert [t.text for t in first] == ["x", "="]
+    # a second burst continues where the first left off, crossing a.py -> b.py
+    second = take(stream, 2)
+    assert [t.text for t in second] == ["1", "y"]
+
+
+def test_take_non_positive_returns_empty_and_leaves_cursor():
+    stream = CodeStream(["a.py", "b.py"], _reader(_SIMPLE_SOURCES))
+    assert take(stream, 0) == []
+    assert take(stream, -3) == []
+    # cursor untouched: the next token is still a.py's first
+    tok = stream.next()
+    assert tok is not None and tok.text == "x"
+
+
+def test_take_on_empty_stream_returns_empty_without_hanging():
+    # every file unreadable → stream yields None → take stops, no infinite loop
+    stream = CodeStream(["x.py"], _reader({}))
+    assert take(stream, 5) == []
+
+
+def test_babyide_tokens_per_key_range_is_sane():
+    # min ≥ 1 (every press reveals something) and min ≤ max (rng.randint won't raise)
+    assert config.BABYIDE_TOKENS_PER_KEY_MIN >= 1
+    assert config.BABYIDE_TOKENS_PER_KEY_MIN <= config.BABYIDE_TOKENS_PER_KEY_MAX
 
 
 # ---------------------------------------------------------------------------
