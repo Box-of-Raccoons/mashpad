@@ -12,7 +12,7 @@ import random
 import pygame
 
 from mashpad import (
-    config, imagepack, items, keymap, lockdown as lockdown_mod, paths,
+    combos, config, imagepack, items, keymap, lockdown as lockdown_mod, paths,
     render, settings as settings_mod,
 )
 from mashpad.audio import Audio
@@ -29,9 +29,27 @@ rng = random.Random()
 
 
 def _parse_size(text: str) -> tuple[int, int]:
-    """Parse a 'WxH' string (e.g. '1280x720') into an (int, int) size."""
-    w, h = text.lower().split("x")
-    return int(w), int(h)
+    """Parse a 'WxH' string (e.g. '1280x720') into an (int, int) size.
+
+    Raises argparse.ArgumentTypeError on any malformed input so that argparse
+    prints a proper usage error instead of a raw traceback.
+    """
+    parts = text.lower().split("x")
+    if len(parts) != 2:
+        raise argparse.ArgumentTypeError(
+            f"expected WxH (e.g. 1280x720), got {text!r}"
+        )
+    try:
+        w, h = int(parts[0]), int(parts[1])
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"expected WxH (e.g. 1280x720), got {text!r}"
+        )
+    if w <= 0 or h <= 0:
+        raise argparse.ArgumentTypeError(
+            f"expected WxH (e.g. 1280x720), got {text!r}"
+        )
+    return w, h
 
 
 def _char_for_event(event) -> str | None:
@@ -56,14 +74,11 @@ def _spawn(field: ItemField, spec, pos, now: float, font, audio: Audio,
 
     Every allowed spawn advances the voice selector, then plays the clip in the
     now-current voice (letters honour *letter_case* when their surface is built).
-    Also feeds the phrase director: a cap force-fade (pre-checked here so
-    items.py semantics are untouched) arms 'screenfull', and the spawn itself —
-    with the live image count — drives hello / fun / raccoons.
+    Also feeds the phrase director: if spawn force-faded a live item to enforce
+    the MAX_ITEMS cap, arms 'screenfull'; the spawn itself — with the live image
+    count — drives hello / fun / raccoons.
     """
-    live_before = [i for i in field.items if i.state(now) != items.DEAD]
-    if len(live_before) >= config.MAX_ITEMS:
-        director.note_cap_hit(now)
-    item = field.spawn(spec, pos, now)
+    item, forced_fade = field.spawn(spec, pos, now)
     item.surface = render.build_item_surface(spec, font, images, letter_case=letter_case)
     selector.on_keystroke()
     audio.play_for(spec, rng, voice=selector.current())
@@ -72,6 +87,8 @@ def _spawn(field: ItemField, spec, pos, now: float, font, audio: Audio,
         if i.state(now) != items.DEAD and i.spec.kind == "image"
     )
     director.note_spawn(now, raccoons)
+    if forced_fade:
+        director.note_cap_hit(now)
 
 
 def main(argv=None) -> None:
@@ -81,6 +98,7 @@ def main(argv=None) -> None:
         nargs="?",
         const="1280x720",
         default=None,
+        type=_parse_size,
         metavar="WxH",
         help="run in a window (default 1280x720); omit for fullscreen",
     )
@@ -97,11 +115,11 @@ def main(argv=None) -> None:
 
     # Larger mixer buffer BEFORE pygame.init() (which would otherwise init the
     # mixer at the 512-sample default — audible crackle/underruns on the Pi).
-    pygame.mixer.pre_init(frequency=44100, size=-16, channels=2, buffer=2048)
+    pygame.mixer.pre_init(frequency=config.MIXER_FREQUENCY_HZ, size=-16, channels=2, buffer=config.MIXER_BUFFER_SAMPLES)
     pygame.init()
 
     if args.windowed is not None:
-        screen = pygame.display.set_mode(_parse_size(args.windowed))
+        screen = pygame.display.set_mode(args.windowed)
         pygame.mouse.set_visible(True)
     else:
         # Fullscreen on the Pi: NEVER pass a real size — (0,0)+FULLSCREEN takes
@@ -116,164 +134,163 @@ def main(argv=None) -> None:
     # Ctrl+Alt+Del is reserved by the OS and is never affected. Torn down before
     # pygame.quit() at shutdown.
     lock = lockdown_mod.Lockdown()
-    if args.windowed is None and not args.no_lockdown:
-        lock.start()
+    try:
+        if args.windowed is None and not args.no_lockdown:
+            lock.start()
 
-    font_path = paths.app_root() / "assets" / "DejaVuSans-Bold.ttf"
-    # Sized once from ITEM_SIZE_PX; reused for every glyph (never re-created).
-    font = pygame.font.Font(str(font_path), int(config.ITEM_SIZE_PX * 0.9))
+        font_path = paths.app_root() / "assets" / "DejaVuSans-Bold.ttf"
+        # Sized once from ITEM_SIZE_PX; reused for every glyph (never re-created).
+        font = pygame.font.Font(str(font_path), int(config.ITEM_SIZE_PX * 0.9))
 
-    # Load the image pack.  Scan first (pure, no pygame), then load + scale each
-    # PNG once at startup.  A corrupt or unloadable file prints one warning and is
-    # skipped — the app must not crash on a bad image.
-    _image_entries = imagepack.scan(
-        paths.app_root() / "assets" / config.IMAGES_DIR_NAME
-    )
-    images: dict[str, pygame.Surface] = {}
-    for _entry in _image_entries:
-        try:
-            _raw = pygame.image.load(str(_entry.path)).convert_alpha()
-            # Scale to fit within ITEM_SIZE_PX × ITEM_SIZE_PX preserving aspect ratio.
-            _w, _h = _raw.get_size()
-            _scale = min(config.ITEM_SIZE_PX / _w, config.ITEM_SIZE_PX / _h)
-            _nw = max(1, int(round(_w * _scale)))
-            _nh = max(1, int(round(_h * _scale)))
-            images[_entry.name] = pygame.transform.smoothscale(_raw, (_nw, _nh))
-        except Exception as exc:  # noqa: BLE001 — skip bad image, never crash
-            print(f"[mashpad images] could not load {_entry.path.name}: {exc}")
+        # Load the image pack.  Scan first (pure, no pygame), then load + scale each
+        # PNG once at startup.  A corrupt or unloadable file prints one warning and is
+        # skipped — the app must not crash on a bad image.
+        _image_entries = imagepack.scan(
+            paths.app_root() / "assets" / config.IMAGES_DIR_NAME
+        )
+        images: dict[str, pygame.Surface] = {}
+        for _entry in _image_entries:
+            try:
+                _raw = pygame.image.load(str(_entry.path)).convert_alpha()
+                # Scale to fit within ITEM_SIZE_PX × ITEM_SIZE_PX preserving aspect ratio.
+                _w, _h = _raw.get_size()
+                _scale = min(config.ITEM_SIZE_PX / _w, config.ITEM_SIZE_PX / _h)
+                _nw = max(1, int(round(_w * _scale)))
+                _nh = max(1, int(round(_h * _scale)))
+                images[_entry.name] = pygame.transform.smoothscale(_raw, (_nw, _nh))
+            except Exception as exc:  # noqa: BLE001 — skip bad image, never crash
+                print(f"[mashpad images] could not load {_entry.path.name}: {exc}")
 
-    # Extras: pool members for non-alphanumeric key spawns.  Single-char names
-    # (e.g. "a.png", "7.png") are reskins only — exclude them from the pool.
-    _extras = [
-        e for e in _image_entries
-        if not (len(e.name) == 1 and e.name.isalnum())
-    ]
+        # Extras: pool members for non-alphanumeric key spawns.  Single-char names
+        # (e.g. "a.png", "7.png") are reskins only — exclude them from the pool.
+        _extras = [
+            e for e in _image_entries
+            if not (len(e.name) == 1 and e.name.isalnum())
+        ]
 
-    audio = Audio(muted=args.mute)
+        audio = Audio(muted=args.mute)
 
-    # Grown-up options: load persisted settings, apply master volume, and build
-    # the voice selector from the discovered packs + the saved mode.
-    settings_path = paths.data_dir() / config.SETTINGS_FILE
-    app_settings = settings_mod.load(settings_path)
-    audio.set_master_volume(app_settings.volume / 100.0)
-    # Gender per discovered pack (unknown packs → None) for cycle alternation.
-    genders = {
-        name: config.VOICE_INFO.get(name, (name.title(), None))[1]
-        for name in audio.voices
-    }
-    selector = VoiceSelector(
-        audio.voices, app_settings.voice_mode, genders, rng
-    )
-    menu = Menu(app_settings, audio, font_path)
-    # voice_mode as it was when the menu opened — used to detect a rebuild on close.
-    menu_open_voice_mode = app_settings.voice_mode
+        # Grown-up options: load persisted settings, apply master volume, and build
+        # the voice selector from the discovered packs + the saved mode.
+        settings_path = paths.data_dir() / config.SETTINGS_FILE
+        app_settings = settings_mod.load(settings_path)
+        audio.set_master_volume(app_settings.volume / 100.0)
+        # Gender per discovered pack (unknown packs → None) for cycle alternation.
+        genders = {
+            name: config.voice_gender(name)
+            for name in audio.voices
+        }
+        selector = VoiceSelector(
+            audio.voices, app_settings.voice_mode, genders, rng
+        )
+        menu = Menu(app_settings, audio, font_path, settings_path)
+        # voice_mode as it was when the menu opened — used to detect a rebuild on close.
+        menu_open_voice_mode = app_settings.voice_mode
 
-    field = ItemField()
-    trail = Trail()
-    bucket = TokenBucket(config.BUCKET_CAPACITY, config.BUCKET_REFILL_PER_S)
-    splash = Splash(screen)
-    director = PhraseDirector(rng, pygame.time.get_ticks() / 1000.0)
-    if splash.visible:
-        director.note_splash(pygame.time.get_ticks() / 1000.0)
-    clock = pygame.time.Clock()
+        field = ItemField()
+        trail = Trail()
+        bucket = TokenBucket(config.BUCKET_CAPACITY, config.BUCKET_REFILL_PER_S)
+        splash = Splash(screen)
+        director = PhraseDirector(rng, pygame.time.get_ticks() / 1000.0)
+        if splash.visible:
+            director.note_splash(pygame.time.get_ticks() / 1000.0)
+        clock = pygame.time.Clock()
 
-    width, height = screen.get_size()
-    half = config.ITEM_SIZE_PX / 2.0  # keep keyboard spawns fully on-screen
+        width, height = screen.get_size()
+        half = config.ITEM_SIZE_PX / 2.0  # keep keyboard spawns fully on-screen
 
-    running = True
-    while running:
-        now = pygame.time.get_ticks() / 1000.0
+        running = True
+        while running:
+            now = pygame.time.get_ticks() / 1000.0
 
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
-                continue
-
-            # While the menu is open, ALL events route to it and baby input is
-            # suppressed.  On the close transition, reapply volume and rebuild the
-            # selector if the voice mode changed.
-            if menu.visible:
-                if menu.handle_event(event) == "quit":
-                    running = False
-                if not menu.visible:  # just closed
-                    audio.set_master_volume(app_settings.volume / 100.0)
-                    if app_settings.voice_mode != menu_open_voice_mode:
-                        selector = VoiceSelector(
-                            audio.voices, app_settings.voice_mode, genders, rng,
-                        )
-                continue
-
-            # Splash: the first key press / click dismisses it, then the very
-            # same event is processed normally below — the dismissing smash still
-            # spawns its item (and grown-up combos still do their thing).
-            if splash.visible and event.type in (
-                pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN
-            ):
-                splash.dismiss()
-
-            if event.type == pygame.KEYDOWN:
-                # Grown-up exit combo: Ctrl+Alt+Q.
-                if (event.key == pygame.K_q
-                        and event.mod & pygame.KMOD_CTRL
-                        and event.mod & pygame.KMOD_ALT):
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
                     running = False
                     continue
-                # Grown-up options combo: Ctrl+Alt+O.
-                if (event.key == pygame.K_o
-                        and event.mod & pygame.KMOD_CTRL
-                        and event.mod & pygame.KMOD_ALT):
-                    menu_open_voice_mode = app_settings.voice_mode
-                    menu.open()
+
+                # While the menu is open, ALL events route to it and baby input is
+                # suppressed.  On the close transition, reapply volume and rebuild the
+                # selector if the voice mode changed.
+                if menu.visible:
+                    if menu.handle_event(event) == "quit":
+                        running = False
+                    if not menu.visible:  # just closed
+                        audio.set_master_volume(app_settings.volume / 100.0)
+                        if app_settings.voice_mode != menu_open_voice_mode:
+                            selector = VoiceSelector(
+                                audio.voices, app_settings.voice_mode, genders, rng,
+                            )
                     continue
-                image_weight = config.RACCOON_WEIGHTS[app_settings.raccoon_amount]
-                spec = keymap.item_for_key(
-                    _char_for_event(event), rng, _extras, image_weight=image_weight
-                )
-                if bucket.try_take(now):
-                    pos = (rng.uniform(half, width - half),
-                           rng.uniform(half, height - half))
-                    _spawn(field, spec, pos, now, font, audio, selector,
-                           app_settings.letter_case, director, images)
-                else:
-                    director.note_drop(now)
 
-            elif event.type == pygame.MOUSEMOTION:
-                trail.add(event.pos, now)
+                # Splash: the first key press / click dismisses it, then the very
+                # same event is processed normally below — the dismissing smash still
+                # spawns its item (and grown-up combos still do their thing).
+                if splash.visible and event.type in (
+                    pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN
+                ):
+                    splash.dismiss()
 
-            elif event.type == pygame.MOUSEBUTTONDOWN:
-                # Click → shape at the cursor, through the SAME rate-limit bucket.
-                image_weight = config.RACCOON_WEIGHTS[app_settings.raccoon_amount]
-                spec = keymap.item_for_key(None, rng, _extras, image_weight=image_weight)
-                if bucket.try_take(now):
-                    _spawn(field, spec, event.pos, now, font, audio, selector,
-                           app_settings.letter_case, director, images)
-                else:
-                    director.note_drop(now)
+                if event.type == pygame.KEYDOWN:
+                    # Grown-up combos (AltGr-safe; see mashpad.combos). Ctrl+left-Alt
+                    # +Q quits, Ctrl+left-Alt+O opens the options menu.
+                    combo = combos.grown_up_combo(event)
+                    if combo == combos.QUIT:
+                        running = False
+                        continue
+                    if combo == combos.OPTIONS:
+                        menu_open_voice_mode = app_settings.voice_mode
+                        menu.open()
+                        continue
+                    image_weight = config.RACCOON_WEIGHTS.get(app_settings.raccoon_amount, config.RACCOON_WEIGHTS["normal"])
+                    spec = keymap.item_for_key(
+                        _char_for_event(event), rng, _extras, image_weight=image_weight
+                    )
+                    if bucket.try_take(now):
+                        pos = (rng.uniform(half, width - half),
+                               rng.uniform(half, height - half))
+                        _spawn(field, spec, pos, now, font, audio, selector,
+                               app_settings.letter_case, director, images)
+                    else:
+                        director.note_drop(now)
 
-        field.update(now)
-        trail.prune(now)
-        audio.update(now)  # start due phrases + apply the duck envelope
+                elif event.type == pygame.MOUSEMOTION:
+                    trail.add(event.pos, now)
 
-        # Reactive phrases: once per frame, when enabled and the menu is closed.
-        # The splash does NOT gate polling — hello greets over it at startup;
-        # nothing else can be armed before the first input dismisses it. Rotate
-        # the voice first (cycle mode) so the comment speaks in the new voice.
-        if app_settings.phrases and not menu.visible:
-            trigger = director.poll()
-            if trigger is not None:
-                selector.on_trigger()
-                print(f"[mashpad] phrase: {trigger} ({selector.current() or 'default'})")
-                audio.play_phrase(trigger, rng, selector.current())
+                elif event.type == pygame.MOUSEBUTTONDOWN:
+                    # Click → shape at the cursor, through the SAME rate-limit bucket.
+                    image_weight = config.RACCOON_WEIGHTS.get(app_settings.raccoon_amount, config.RACCOON_WEIGHTS["normal"])
+                    spec = keymap.item_for_key(None, rng, _extras, image_weight=image_weight)
+                    if bucket.try_take(now):
+                        _spawn(field, spec, event.pos, now, font, audio, selector,
+                               app_settings.letter_case, director, images)
+                    else:
+                        director.note_drop(now)
 
-        screen.fill(render.BACKGROUND)
-        for item in field.items:          # oldest → newest
-            render.draw_item(screen, item, now)
-        render.draw_trail(screen, trail, now)
-        menu.draw(screen)                 # overlay on top when visible
-        splash.draw(screen, now)          # startup splash, above everything
-        pygame.display.flip()
+            field.update(now)
+            trail.prune(now)
+            audio.update(now)  # start due phrases + apply the duck envelope
 
-        clock.tick(config.FPS)
+            # Reactive phrases: once per frame, when enabled and the menu is closed.
+            # The splash does NOT gate polling — hello greets over it at startup;
+            # nothing else can be armed before the first input dismisses it. Rotate
+            # the voice first (cycle mode) so the comment speaks in the new voice.
+            if app_settings.phrases and not menu.visible:
+                trigger = director.poll(now)
+                if trigger is not None:
+                    selector.on_trigger()
+                    print(f"[mashpad] phrase: {trigger} ({selector.current() or 'default'})")
+                    audio.play_phrase(trigger, rng, selector.current())
 
-    lock.stop()  # remove the keyboard hook (no-op if it was never installed)
-    pygame.quit()
+            screen.fill(render.BACKGROUND)
+            for item in field.items:          # oldest → newest
+                render.draw_item(screen, item, now)
+            render.draw_trail(screen, trail, now)
+            menu.draw(screen)                 # overlay on top when visible
+            splash.draw(screen, now)          # startup splash, above everything
+            pygame.display.flip()
+
+            clock.tick(config.FPS)
+
+    finally:
+        lock.stop()  # remove the keyboard hook (no-op if it was never installed)
+        pygame.quit()

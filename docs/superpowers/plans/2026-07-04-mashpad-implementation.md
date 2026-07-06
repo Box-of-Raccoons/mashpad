@@ -1,5 +1,7 @@
 # mashpad — implementation plan
 
+> **Superseded note (build 7):** this document describes build 1. Later builds deliberately added the grown-up options menu + settings.json (build 4), reactive phrases + a 9th mixer channel (build 5), and the Windows desktop edition (build 6) — where this doc and the code disagree, the code is current.
+
 **Date:** 2026-07-04
 **Spec:** `docs/superpowers/specs/2026-07-04-mashpad-design.md` (approved)
 **Execution model:** Opus/Sonnet worker agents make file edits; the orchestrator

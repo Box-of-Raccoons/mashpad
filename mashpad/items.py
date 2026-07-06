@@ -135,21 +135,26 @@ class ItemField:
         spec: ItemSpec,
         pos: Tuple[float, float],
         now: float,
-    ) -> Item:
+    ) -> tuple[Item, bool]:
         """Create and register a new item.
 
-        If live count >= MAX_ITEMS, force-fades the oldest non-fading item first.
+        Returns (item, forced_fade) where forced_fade is True if a live
+        non-fading item was force-faded to enforce the MAX_ITEMS cap.
+        If all live items are already fading, forced_fade is False (nothing to
+        force) — callers should only signal a cap hit when forced_fade is True.
         """
         live = [i for i in self._items if i.state(now) != DEAD]
+        forced_fade = False
         if len(live) >= config.MAX_ITEMS:
             for candidate in live:  # oldest first
                 if candidate.state(now) not in (FADING, DEAD):
                     candidate.force_fade(now)
+                    forced_fade = True
                     break
 
         item = Item(spec=spec, pos=pos, spawn_time=now)
         self._items.append(item)
-        return item
+        return item, forced_fade
 
     def update(self, now: float) -> None:
         """Drop DEAD items from the list."""

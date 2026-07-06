@@ -9,7 +9,8 @@
 #   sounds/voice/<voicename>/<word>-<take>.ogg|.wav   → a named voice pack
 #       (files grouped by <word>; a file with no "-<digits>" suffix is take 1)
 #   sounds/voice/<word>.wav                           → the legacy flat layout,
-#       loaded as a single anonymous voice named "default"
+#       loaded as "default" ONLY when no subdirectory packs are present
+#       (fallback for bare installs; curated packs take priority over robot TTS)
 # The app works with zero packs, flat files only, or several packs.
 
 from __future__ import annotations
@@ -20,16 +21,6 @@ import pygame
 
 from mashpad import config, paths
 from mashpad.duck import DuckWindow
-
-
-def repo_root() -> Path:
-    """Read-only content root — thin alias for paths.app_root().
-
-    Kept because other modules import `repo_root` from here. Not frozen this is
-    the repo root (parent of the `mashpad` package); frozen it is the bundle
-    dir. See mashpad/paths.py.
-    """
-    return paths.app_root()
 
 
 class Audio:
@@ -58,11 +49,11 @@ class Audio:
         try:
             pygame.mixer.init()
             pygame.mixer.set_num_channels(config.MIXER_CHANNELS)
-            # Channel 0 belongs to phrases; the bed allocator below never hands
+            # PHRASE_CHANNEL belongs to phrases; the bed allocator below never hands
             # it out, so a mash burst can't starve a firing phrase of a channel.
             # (set_reserved() is NOT used: pygame-ce 2.5.7's find_channel()
             # ignores reservations — verified empirically.)
-            self._phrase_channel = pygame.mixer.Channel(0)
+            self._phrase_channel = pygame.mixer.Channel(config.PHRASE_CHANNEL)
         except Exception as exc:  # noqa: BLE001 — any mixer failure → silent mode
             print(f"[mashpad audio] mixer init failed ({exc}); running silent")
             return
@@ -86,7 +77,7 @@ class Audio:
 
         voice=None → use the "default" voice if present, else no voice clip (the
         effect still plays). A voice name not among the loaded packs → no voice
-        clip. Voice clips play at master volume; effects at 0.7 × master.
+        clip. Voice clips play at master volume; effects at EFFECT_VOLUME × master.
         """
         if not self._ok:
             return
@@ -101,7 +92,7 @@ class Audio:
                     self._play(clip)
         if self._effects:
             effect = rng.choice(self._effects)
-            effect.set_volume(0.7 * self._master)
+            effect.set_volume(config.EFFECT_VOLUME * self._master)
             self._play(effect)
 
     def play_phrase(self, trigger: str, rng, voice=None) -> None:
@@ -139,9 +130,9 @@ class Audio:
     def update(self, now: float) -> None:
         """Per-frame: start a due phrase and apply the duck envelope to the bed.
 
-        The phrase plays on the reserved channel 0 — never dropped when the bed
+        The phrase plays on the reserved PHRASE_CHANNEL — never dropped when the bed
         has every open channel busy; a new phrase interrupts the previous one.
-        Channels 1.. are the bed and follow the envelope every frame, which is
+        Channels PHRASE_CHANNEL+1.. are the bed and follow the envelope every frame, which is
         also what fades them smoothly instead of stepping.
         """
         if not self._ok:
@@ -152,7 +143,7 @@ class Audio:
             self._phrase_channel.set_volume(1.0)
             self._phrase_channel.play(clip)
         bed_volume = self._duck.factor(now)
-        for i in range(1, pygame.mixer.get_num_channels()):
+        for i in range(config.PHRASE_CHANNEL + 1, pygame.mixer.get_num_channels()):
             channel = pygame.mixer.Channel(i)
             if channel.get_busy():
                 channel.set_volume(bed_volume)
@@ -160,7 +151,7 @@ class Audio:
     # ----------------------------------------------------------------- loading
 
     def _load(self) -> None:
-        root = repo_root()
+        root = paths.app_root()
         self._voice, self._phrases = self._load_voices(root / "sounds" / "voice")
         self._effects = self._load_effects(root / "sounds" / "effects")
 
@@ -170,6 +161,12 @@ class Audio:
         Returns ({voice: {word: [Sound]}}, {voice: {trigger: [Sound]}}) — spoken
         words and reactive-phrase clips kept in separate maps so phrase clips are
         never picked as a spoken word.
+
+        Flat files directly under *directory* are a legacy/fallback layout
+        (install.sh generates them via espeak/piper). They are only exposed as a
+        "default" voice when no subdirectory pack was found — if any curated pack
+        is present the robot-TTS flat files are silently ignored so they do not
+        join the random rotation.
         """
         voices: dict[str, dict[str, list]] = {}
         phrases: dict[str, dict[str, list]] = {}
@@ -182,11 +179,12 @@ class Audio:
                 voices[sub.name] = words
             if pack_phrases:
                 phrases[sub.name] = pack_phrases
-        # Legacy flat files directly under sounds/voice/ → the "default" voice.
+        # Legacy flat files — fallback only: skip entirely when any subdir pack
+        # was found so robot-TTS clips never contaminate the curated rotation.
         flat_words, flat_phrases = self._load_pack(directory)
-        if flat_words and "default" not in voices:
+        if flat_words and not voices:
             voices["default"] = flat_words
-        if flat_phrases and "default" not in phrases:
+        if flat_phrases and not phrases:
             phrases["default"] = flat_phrases
         return voices, phrases
 
@@ -255,11 +253,11 @@ class Audio:
     # ---------------------------------------------------------------- playback
 
     def _play(self, sound: "pygame.mixer.Sound"):
-        # First idle bed channel (1..); None when all are busy — skip rather
-        # than block or forcibly steal a playing channel. Channel 0 is the
+        # First idle bed channel (PHRASE_CHANNEL+1..); None when all are busy — skip rather
+        # than block or forcibly steal a playing channel. PHRASE_CHANNEL is the
         # phrase channel and is never used for the bed.
         channel = None
-        for i in range(1, pygame.mixer.get_num_channels()):
+        for i in range(config.PHRASE_CHANNEL + 1, pygame.mixer.get_num_channels()):
             candidate = pygame.mixer.Channel(i)
             if not candidate.get_busy():
                 channel = candidate

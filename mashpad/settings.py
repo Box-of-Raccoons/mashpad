@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -17,13 +18,16 @@ VOLUME_MAX = 100
 # The only accepted values for the two enum-like fields.
 LETTER_CASES = ("upper", "lower")
 RACCOON_AMOUNTS = ("less", "normal", "lots")
+# Voice-mode selection constants.
+VOICE_MODE_RANDOM = "random"
+VOICE_MODE_CYCLE = "cycle"
 
 
 @dataclass
 class Settings:
     """The four grown-up-tunable options, with baby-safe defaults."""
-    # "random" | "cycle" | a specific voice-pack name.
-    voice_mode: str = "random"
+    # VOICE_MODE_RANDOM | VOICE_MODE_CYCLE | a specific voice-pack name.
+    voice_mode: str = VOICE_MODE_RANDOM
     # Master volume 0–100 (UI steps by 10).
     volume: int = 80
     # "upper" → letters render as A-Z; "lower" → a-z.
@@ -82,8 +86,12 @@ def load(path: Path) -> Settings:
     return _from_dict(raw)
 
 
-def save(settings: Settings, path: Path) -> None:
-    """Write *settings* to *path* atomically (tmp file + os.replace)."""
+def save(settings: Settings, path: Path) -> bool:
+    """Write *settings* to *path* atomically (tmp → fsync → os.replace).
+
+    Returns True on success, False on OSError (e.g. SD card read-only or full).
+    On failure a single warning line is printed; the app continues normally.
+    """
     path = Path(path)
     tmp = path.with_name(path.name + ".tmp")
     data = {
@@ -93,5 +101,17 @@ def save(settings: Settings, path: Path) -> None:
         "raccoon_amount": settings.raccoon_amount,
         "phrases": settings.phrases,
     }
-    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    tmp.replace(path)  # atomic on the same filesystem
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(data, indent=2))
+            fh.flush()
+            os.fsync(fh.fileno())
+        tmp.replace(path)  # atomic on the same filesystem
+    except OSError as exc:
+        print(f"[mashpad settings] could not save {path}: {exc}")
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        return False
+    return True

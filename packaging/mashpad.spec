@@ -11,6 +11,11 @@ from pathlib import Path
 
 REPO = Path(SPECPATH).resolve().parent  # SPECPATH IS the packaging dir -> repo root
 
+# A build without the committed voice packs ships a silent app — fail loudly.
+_voice_clips = list((REPO / "sounds" / "voice").rglob("*.ogg"))
+if not _voice_clips:
+    raise SystemExit("mashpad.spec: sounds/voice contains no .ogg clips — voice packs missing from this worktree")
+
 a = Analysis(
     [str(REPO / "packaging" / "launcher.py")],
     pathex=[str(REPO)],

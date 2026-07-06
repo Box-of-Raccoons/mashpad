@@ -147,3 +147,33 @@ def test_phrases_non_bool_rejected(tmp_path):
 def test_settings_no_pygame():
     import mashpad.settings  # noqa: F401
     assert "pygame" not in sys.modules, "settings imported pygame!"
+
+
+# ---------------------------------------------------------------------------
+# save() error handling — OSError must not propagate; tmp cleaned up
+# ---------------------------------------------------------------------------
+
+def test_save_returns_false_when_parent_is_file(tmp_path):
+    """save() returns False (does not raise) when the target dir is a file."""
+    # Write a regular file at a path we then use as a "directory" — any open()
+    # inside save() will fail with NotADirectoryError (an OSError subclass).
+    bad_dir = tmp_path / "f"
+    bad_dir.write_text("not a directory", encoding="utf-8")
+    result = save(Settings(), bad_dir / "settings.json")
+    assert result is False
+
+
+def test_save_no_orphan_tmp_on_failure(tmp_path):
+    """save() cleans up the tmp file (if any) when it fails to write."""
+    bad_dir = tmp_path / "f"
+    bad_dir.write_text("not a directory", encoding="utf-8")
+    target = bad_dir / "settings.json"
+    save(Settings(), target)
+    # The tmp file lives alongside the target; neither should exist after failure.
+    assert not (bad_dir / "settings.json.tmp").exists()
+
+
+def test_save_returns_true_on_success(tmp_path):
+    """save() returns True when the write succeeds."""
+    result = save(Settings(), tmp_path / "settings.json")
+    assert result is True

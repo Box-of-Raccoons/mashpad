@@ -19,7 +19,9 @@ PALETTE = [
 # Names of the eight shapes the app can spawn.
 SHAPES = ["circle", "square", "triangle", "star", "heart", "diamond", "pentagon", "ring"]
 
-# Maximum number of live (non-dead) items on screen at once.
+# Cap on non-fading items: each spawn past this force-fades the oldest, so the
+# on-screen total can briefly exceed it by ~BUCKET_REFILL_PER_S × FADE_S while
+# they fade out.
 MAX_ITEMS = 20
 
 # Target frames per second for the main render loop.
@@ -49,8 +51,14 @@ TRAIL_FADE_S = 0.6
 # Maximum number of trail points kept in the deque (oldest evicted when full).
 TRAIL_MAX_POINTS = 64
 
+# Reserved mixer channel index for reactive phrases; bed channels start at PHRASE_CHANNEL+1.
+PHRASE_CHANNEL = 0
+
 # Number of pygame mixer channels to allocate.
 MIXER_CHANNELS = 9  # 8 for letters/effects + 1 reserved for reactive phrases
+
+# Effect-clip volume relative to master (voice clips play at 1.0 × master).
+EFFECT_VOLUME = 0.7
 
 # Rendered size (diameter / side) of each item in pixels at scale=1.0.
 ITEM_SIZE_PX = 280
@@ -59,6 +67,7 @@ ITEM_SIZE_PX = 280
 IMAGES_DIR_NAME = "images"
 
 # Probability a non-letter spawn is an image (when images exist), per setting.
+# Keys must match settings.RACCOON_AMOUNTS (validated there; menu steps through it).
 RACCOON_WEIGHTS = {"less": 0.25, "normal": 0.5, "lots": 0.75}
 
 # Filename (under the repo root) where grown-up options persist.
@@ -74,6 +83,16 @@ VOICE_INFO = {
     "achernar": ("Voice 5", "female"),
     "kore": ("Voice 6", "female"),
 }
+
+
+def voice_label(name: str) -> str:
+    """Return the friendly menu label for a voice pack name."""
+    return VOICE_INFO.get(name, (name.title(), None))[0]
+
+
+def voice_gender(name: str) -> str | None:
+    """Return the gender for a voice pack name (or None if unknown)."""
+    return VOICE_INFO.get(name, (name.title(), None))[1]
 
 # Copyright year shown in the options-menu About footer.
 BUILD_YEAR = 2026
@@ -117,3 +136,16 @@ SLOWDOWN_WINDOW_S = 3.0
 
 # Idle seconds with no spawn after which the next spawn re-triggers "hello".
 HELLO_IDLE_S = 300.0
+
+# Seconds an armed phrase trigger stays valid before it silently expires.
+# Must exceed PHRASE_COOLDOWN_S so a trigger armed during a cooldown still gets
+# one shot after the cooldown opens (45 > 30).  Triggers that are continuously
+# re-armed (e.g. raccoons pile still on screen) refresh their armed_time each
+# re-arm and so never expire.  'hello' is exempt from this TTL.
+PHRASE_ARM_TTL_S = 45.0
+
+# Mixer sample rate.
+MIXER_FREQUENCY_HZ = 44100
+
+# Mixer buffer size; raise if a device crackles/underruns (Pi tuning knob).
+MIXER_BUFFER_SAMPLES = 2048

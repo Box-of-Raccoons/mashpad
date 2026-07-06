@@ -37,6 +37,32 @@ VK_RWIN = 0x5C
 # KBDLLHOOKSTRUCT.flags bit: the Alt key was down when the key was struck.
 LLKHF_ALTDOWN = 0x20
 
+# --- Accessibility shortcut suppression (SystemParametersInfo) ---------------
+# A baby hammering Shift 5x (StickyKeys), holding Shift ~8s (FilterKeys), or
+# hitting NumLock (ToggleKeys) pops an OS dialog OVER the fullscreen app and
+# steals focus — the LL hook can't stop these because they trigger on plain
+# Shift, which we deliberately pass through. So while locked down we clear only
+# the *hotkey* activation flags (session-only, never persisted to the registry),
+# and only for features the user hasn't already turned on. Mirrors BabySmash.
+SPI_GETSTICKYKEYS = 0x003A
+SPI_SETSTICKYKEYS = 0x003B
+SPI_GETFILTERKEYS = 0x0032
+SPI_SETFILTERKEYS = 0x0033
+SPI_GETTOGGLEKEYS = 0x0034
+SPI_SETTOGGLEKEYS = 0x0035
+
+# "feature is currently ON" bit — if set, the user genuinely uses it: leave it.
+SKF_STICKYKEYSON = 0x00000001
+FKF_FILTERKEYSON = 0x00000001
+TKF_TOGGLEKEYSON = 0x00000001
+
+# Hotkey-activation bits we clear so the Shift/NumLock gesture stops popping the
+# dialog. Same bit values across the SKF_/FKF_/TKF_ families.
+ACCESS_HOTKEYACTIVE = 0x00000004   # the keyboard gesture can turn the feature on
+ACCESS_CONFIRMHOTKEY = 0x00000008  # show the confirmation dialog on the gesture
+ACCESS_HOTKEYSOUND = 0x00000010    # play the rising/falling siren on the gesture
+_ACCESS_HOTKEY_BITS = ACCESS_HOTKEYACTIVE | ACCESS_CONFIRMHOTKEY | ACCESS_HOTKEYSOUND
+
 # GetAsyncKeyState high bit → the key is currently down.
 _KEY_DOWN_BIT = 0x8000
 
@@ -61,6 +87,10 @@ class Lockdown:
         self._thread_id = None   # GetCurrentThreadId of the pump thread
         self._hook = None        # the HHOOK handle
         self._user32 = None      # cached WinDLL for PostThreadMessageW from stop()
+        # Accessibility shortcuts we suppressed: label -> (set_action, size, raw
+        # original struct bytes) so stop() can SPI_SET each back verbatim. Empty
+        # dict = nothing to restore (also the idempotency guard).
+        self._saved_access = {}
 
     @property
     def active(self) -> bool:
@@ -75,6 +105,11 @@ class Lockdown:
         if sys.platform != "win32":
             print("[mashpad lockdown] non-Windows platform; keyboard lockdown disabled")
             return
+        # Suppress the accessibility-shortcut popups first, on THIS (calling)
+        # thread — SystemParametersInfo has no thread affinity, so it needn't go
+        # on the pump thread and must stay out of the hook callback. It applies
+        # even if the hook below fails to install (stop() still restores).
+        self._suppress_accessibility_shortcuts()
         ready = threading.Event()
         self._thread = threading.Thread(
             target=self._run, args=(ready,), name="mashpad-lockdown", daemon=True
@@ -87,22 +122,122 @@ class Lockdown:
     # ------------------------------------------------------------------- stop
 
     def stop(self) -> None:
-        """Remove the hook and stop the pump thread. Safe to call when never started."""
-        if self._thread is None:
-            self._active = False
-            return
-        # End the pump thread's GetMessageW loop; it then unhooks on its own
-        # (installing thread) before exiting.
-        if self._thread_id and self._user32 is not None:
-            try:
-                self._user32.PostThreadMessageW(self._thread_id, WM_QUIT, 0, 0)
-            except Exception as exc:  # noqa: BLE001 — never crash on teardown
-                print(f"[mashpad lockdown] error posting WM_QUIT ({exc})")
-        self._thread.join(timeout=5.0)
-        self._thread = None
-        self._thread_id = None
-        self._user32 = None
+        """Remove the hook and stop the pump thread. Safe to call when never started.
+
+        Always restores the accessibility shortcuts we changed — even if the hook
+        never installed — so a parent's session settings are never left altered.
+        """
+        if self._thread is not None:
+            # End the pump thread's GetMessageW loop; it then unhooks on its own
+            # (installing thread) before exiting.
+            if self._thread_id and self._user32 is not None:
+                try:
+                    self._user32.PostThreadMessageW(self._thread_id, WM_QUIT, 0, 0)
+                except Exception as exc:  # noqa: BLE001 — never crash on teardown
+                    print(f"[mashpad lockdown] error posting WM_QUIT ({exc})")
+            self._thread.join(timeout=5.0)
+            self._thread = None
+            self._thread_id = None
+            self._user32 = None
+        # Restore regardless of hook state; idempotent (clears the saved dict).
+        self._restore_accessibility_shortcuts()
         self._active = False
+
+    # ------------------------------------------- accessibility shortcut guard
+
+    def _suppress_accessibility_shortcuts(self) -> None:
+        """Clear the Sticky/Filter/Toggle Keys HOTKEY flags (Windows, session-only).
+
+        For each feature: read the current struct; if the feature is already ON
+        (the user relies on it) leave it entirely; otherwise save the original
+        struct and SPI_SET a copy with the hotkey-activation bits cleared. Uses
+        fWinIni=0 so nothing is written to the registry. Wrapped so any failure
+        logs one line and never crashes the app; a no-op off Windows.
+        """
+        if sys.platform != "win32":
+            return
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            user32 = ctypes.WinDLL("user32", use_last_error=True)
+            user32.SystemParametersInfoW.argtypes = [
+                wintypes.UINT, wintypes.UINT, ctypes.c_void_p, wintypes.UINT
+            ]
+            user32.SystemParametersInfoW.restype = wintypes.BOOL
+
+            # STICKYKEYS / TOGGLEKEYS are {DWORD cbSize; DWORD dwFlags}.
+            class STICKYKEYS(ctypes.Structure):
+                _fields_ = [("cbSize", wintypes.DWORD), ("dwFlags", wintypes.DWORD)]
+
+            class TOGGLEKEYS(ctypes.Structure):
+                _fields_ = [("cbSize", wintypes.DWORD), ("dwFlags", wintypes.DWORD)]
+
+            # FILTERKEYS carries four extra timing fields we must round-trip.
+            class FILTERKEYS(ctypes.Structure):
+                _fields_ = [
+                    ("cbSize", wintypes.UINT),
+                    ("dwFlags", wintypes.DWORD),
+                    ("iWaitMSec", wintypes.DWORD),
+                    ("iDelayMSec", wintypes.DWORD),
+                    ("iRepeatMSec", wintypes.DWORD),
+                    ("iBounceMSec", wintypes.DWORD),
+                ]
+
+            # (label, GET action, SET action, struct type, "feature is ON" bit).
+            specs = [
+                ("stickykeys", SPI_GETSTICKYKEYS, SPI_SETSTICKYKEYS,
+                 STICKYKEYS, SKF_STICKYKEYSON),
+                ("filterkeys", SPI_GETFILTERKEYS, SPI_SETFILTERKEYS,
+                 FILTERKEYS, FKF_FILTERKEYSON),
+                ("togglekeys", SPI_GETTOGGLEKEYS, SPI_SETTOGGLEKEYS,
+                 TOGGLEKEYS, TKF_TOGGLEKEYSON),
+            ]
+            for label, get_action, set_action, struct_type, on_bit in specs:
+                size = ctypes.sizeof(struct_type)
+                st = struct_type()
+                st.cbSize = size
+                if not user32.SystemParametersInfoW(
+                    get_action, size, ctypes.byref(st), 0
+                ):
+                    continue  # couldn't read this one — leave it untouched
+                if st.dwFlags & on_bit:
+                    continue  # user actively uses it → never fight them
+                if not (st.dwFlags & _ACCESS_HOTKEY_BITS):
+                    continue  # hotkey already disabled — nothing to do
+                # Save the FULL original struct so restore round-trips every field.
+                self._saved_access[label] = (set_action, size, bytes(st))
+                new = struct_type.from_buffer_copy(st)
+                new.dwFlags = st.dwFlags & ~_ACCESS_HOTKEY_BITS
+                user32.SystemParametersInfoW(
+                    set_action, size, ctypes.byref(new), 0
+                )
+        except Exception as exc:  # noqa: BLE001 — never crash on this convenience
+            print(f"[mashpad lockdown] could not adjust accessibility shortcuts ({exc})")
+
+    def _restore_accessibility_shortcuts(self) -> None:
+        """SPI_SET each saved struct back verbatim. Idempotent; a no-op if nothing saved."""
+        if not self._saved_access:
+            return
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            user32 = ctypes.WinDLL("user32", use_last_error=True)
+            user32.SystemParametersInfoW.argtypes = [
+                wintypes.UINT, wintypes.UINT, ctypes.c_void_p, wintypes.UINT
+            ]
+            user32.SystemParametersInfoW.restype = wintypes.BOOL
+            for set_action, size, raw in self._saved_access.values():
+                try:
+                    buf = ctypes.create_string_buffer(raw, size)
+                    user32.SystemParametersInfoW(set_action, size, buf, 0)
+                except Exception as exc:  # noqa: BLE001 — one bad restore mustn't stop the rest
+                    print(f"[mashpad lockdown] error restoring accessibility flags ({exc})")
+        except Exception as exc:  # noqa: BLE001 — never crash on teardown
+            print(f"[mashpad lockdown] could not restore accessibility shortcuts ({exc})")
+        finally:
+            self._saved_access = {}  # idempotent: a second stop() does nothing
 
     # ------------------------------------------------------- pump thread body
 
