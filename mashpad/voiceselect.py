@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import random as _random
 
+from mashpad import settings as settings_mod
+
 
 class VoiceSelector:
     """Tracks the active voice-pack name for a given mode.
@@ -32,21 +34,21 @@ class VoiceSelector:
         self._current = self._initial()
 
     def _effective_mode(self) -> str:
-        """Resolve the raw mode to one of: 'random', 'cycle', or a voice name."""
-        if self._mode in ("random", "cycle"):
+        """Resolve the raw mode to one of: VOICE_MODE_RANDOM, VOICE_MODE_CYCLE, or a voice name."""
+        if self._mode in (settings_mod.VOICE_MODE_RANDOM, settings_mod.VOICE_MODE_CYCLE):
             return self._mode
         if self._mode in self._voices:
             return self._mode          # a specific voice
-        return "random"                # unknown name → random fallback
+        return settings_mod.VOICE_MODE_RANDOM                # unknown name → random fallback
 
     def _initial(self):
         """Seed .current() before the first keystroke."""
         if not self._voices:
             return None
         mode = self._effective_mode()
-        if mode == "cycle":
+        if mode == settings_mod.VOICE_MODE_CYCLE:
             return self._voices[0]
-        if mode == "random":
+        if mode == settings_mod.VOICE_MODE_RANDOM:
             return self._rng.choice(self._voices)
         return mode                    # fixed voice
 
@@ -57,16 +59,16 @@ class VoiceSelector:
     def on_keystroke(self) -> None:
         """Advance per-spawn selection state.
 
-        In "cycle" mode this is a no-op — the current voice only changes on a
+        In VOICE_MODE_CYCLE this is a no-op — the current voice only changes on a
         phrase trigger (see on_trigger).
         """
         if not self._voices:
             self._current = None
             return
         mode = self._effective_mode()
-        if mode == "random":
+        if mode == settings_mod.VOICE_MODE_RANDOM:
             self._current = self._rng.choice(self._voices)
-        elif mode == "cycle":
+        elif mode == settings_mod.VOICE_MODE_CYCLE:
             return                     # trigger-driven; stays put per keystroke
         else:
             self._current = mode       # fixed voice — never changes
@@ -74,7 +76,7 @@ class VoiceSelector:
     def on_trigger(self) -> None:
         """Advance the voice when the app speaks a reactive phrase.
 
-        Only "cycle" mode rotates (no-op for random / fixed). Rotation is
+        Only VOICE_MODE_CYCLE rotates (no-op for VOICE_MODE_RANDOM / fixed). Rotation is
         round-robin from the current voice but prefers the next voice whose
         gender differs from the current one, so male/female alternate. If no
         voice has a differing known gender (all same, or genders unknown), it
@@ -83,7 +85,7 @@ class VoiceSelector:
         if not self._voices:
             self._current = None
             return
-        if self._effective_mode() != "cycle":
+        if self._effective_mode() != settings_mod.VOICE_MODE_CYCLE:
             return
         n = len(self._voices)
         cur_gender = self._genders.get(self._current)

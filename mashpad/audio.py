@@ -23,16 +23,6 @@ from mashpad import config, paths
 from mashpad.duck import DuckWindow
 
 
-def repo_root() -> Path:
-    """Read-only content root — thin alias for paths.app_root().
-
-    Kept because other modules import `repo_root` from here. Not frozen this is
-    the repo root (parent of the `mashpad` package); frozen it is the bundle
-    dir. See mashpad/paths.py.
-    """
-    return paths.app_root()
-
-
 class Audio:
     """Loads voice packs + effect clips and plays them without blocking or stealing."""
 
@@ -59,11 +49,11 @@ class Audio:
         try:
             pygame.mixer.init()
             pygame.mixer.set_num_channels(config.MIXER_CHANNELS)
-            # Channel 0 belongs to phrases; the bed allocator below never hands
+            # PHRASE_CHANNEL belongs to phrases; the bed allocator below never hands
             # it out, so a mash burst can't starve a firing phrase of a channel.
             # (set_reserved() is NOT used: pygame-ce 2.5.7's find_channel()
             # ignores reservations — verified empirically.)
-            self._phrase_channel = pygame.mixer.Channel(0)
+            self._phrase_channel = pygame.mixer.Channel(config.PHRASE_CHANNEL)
         except Exception as exc:  # noqa: BLE001 — any mixer failure → silent mode
             print(f"[mashpad audio] mixer init failed ({exc}); running silent")
             return
@@ -140,9 +130,9 @@ class Audio:
     def update(self, now: float) -> None:
         """Per-frame: start a due phrase and apply the duck envelope to the bed.
 
-        The phrase plays on the reserved channel 0 — never dropped when the bed
+        The phrase plays on the reserved PHRASE_CHANNEL — never dropped when the bed
         has every open channel busy; a new phrase interrupts the previous one.
-        Channels 1.. are the bed and follow the envelope every frame, which is
+        Channels PHRASE_CHANNEL+1.. are the bed and follow the envelope every frame, which is
         also what fades them smoothly instead of stepping.
         """
         if not self._ok:
@@ -153,7 +143,7 @@ class Audio:
             self._phrase_channel.set_volume(1.0)
             self._phrase_channel.play(clip)
         bed_volume = self._duck.factor(now)
-        for i in range(1, pygame.mixer.get_num_channels()):
+        for i in range(config.PHRASE_CHANNEL + 1, pygame.mixer.get_num_channels()):
             channel = pygame.mixer.Channel(i)
             if channel.get_busy():
                 channel.set_volume(bed_volume)
@@ -161,7 +151,7 @@ class Audio:
     # ----------------------------------------------------------------- loading
 
     def _load(self) -> None:
-        root = repo_root()
+        root = paths.app_root()
         self._voice, self._phrases = self._load_voices(root / "sounds" / "voice")
         self._effects = self._load_effects(root / "sounds" / "effects")
 
@@ -263,11 +253,11 @@ class Audio:
     # ---------------------------------------------------------------- playback
 
     def _play(self, sound: "pygame.mixer.Sound"):
-        # First idle bed channel (1..); None when all are busy — skip rather
-        # than block or forcibly steal a playing channel. Channel 0 is the
+        # First idle bed channel (PHRASE_CHANNEL+1..); None when all are busy — skip rather
+        # than block or forcibly steal a playing channel. PHRASE_CHANNEL is the
         # phrase channel and is never used for the bed.
         channel = None
-        for i in range(1, pygame.mixer.get_num_channels()):
+        for i in range(config.PHRASE_CHANNEL + 1, pygame.mixer.get_num_channels()):
             candidate = pygame.mixer.Channel(i)
             if not candidate.get_busy():
                 channel = candidate

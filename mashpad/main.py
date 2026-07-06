@@ -115,7 +115,7 @@ def main(argv=None) -> None:
 
     # Larger mixer buffer BEFORE pygame.init() (which would otherwise init the
     # mixer at the 512-sample default — audible crackle/underruns on the Pi).
-    pygame.mixer.pre_init(frequency=44100, size=-16, channels=2, buffer=2048)
+    pygame.mixer.pre_init(frequency=config.MIXER_FREQUENCY_HZ, size=-16, channels=2, buffer=config.MIXER_BUFFER_SAMPLES)
     pygame.init()
 
     if args.windowed is not None:
@@ -177,13 +177,13 @@ def main(argv=None) -> None:
         audio.set_master_volume(app_settings.volume / 100.0)
         # Gender per discovered pack (unknown packs → None) for cycle alternation.
         genders = {
-            name: config.VOICE_INFO.get(name, (name.title(), None))[1]
+            name: config.voice_gender(name)
             for name in audio.voices
         }
         selector = VoiceSelector(
             audio.voices, app_settings.voice_mode, genders, rng
         )
-        menu = Menu(app_settings, audio, font_path)
+        menu = Menu(app_settings, audio, font_path, settings_path)
         # voice_mode as it was when the menu opened — used to detect a rebuild on close.
         menu_open_voice_mode = app_settings.voice_mode
 
@@ -241,7 +241,7 @@ def main(argv=None) -> None:
                         menu_open_voice_mode = app_settings.voice_mode
                         menu.open()
                         continue
-                    image_weight = config.RACCOON_WEIGHTS[app_settings.raccoon_amount]
+                    image_weight = config.RACCOON_WEIGHTS.get(app_settings.raccoon_amount, config.RACCOON_WEIGHTS["normal"])
                     spec = keymap.item_for_key(
                         _char_for_event(event), rng, _extras, image_weight=image_weight
                     )
@@ -258,7 +258,7 @@ def main(argv=None) -> None:
 
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     # Click → shape at the cursor, through the SAME rate-limit bucket.
-                    image_weight = config.RACCOON_WEIGHTS[app_settings.raccoon_amount]
+                    image_weight = config.RACCOON_WEIGHTS.get(app_settings.raccoon_amount, config.RACCOON_WEIGHTS["normal"])
                     spec = keymap.item_for_key(None, rng, _extras, image_weight=image_weight)
                     if bucket.try_take(now):
                         _spawn(field, spec, event.pos, now, font, audio, selector,

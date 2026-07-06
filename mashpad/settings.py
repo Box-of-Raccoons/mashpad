@@ -18,13 +18,16 @@ VOLUME_MAX = 100
 # The only accepted values for the two enum-like fields.
 LETTER_CASES = ("upper", "lower")
 RACCOON_AMOUNTS = ("less", "normal", "lots")
+# Voice-mode selection constants.
+VOICE_MODE_RANDOM = "random"
+VOICE_MODE_CYCLE = "cycle"
 
 
 @dataclass
 class Settings:
     """The four grown-up-tunable options, with baby-safe defaults."""
-    # "random" | "cycle" | a specific voice-pack name.
-    voice_mode: str = "random"
+    # VOICE_MODE_RANDOM | VOICE_MODE_CYCLE | a specific voice-pack name.
+    voice_mode: str = VOICE_MODE_RANDOM
     # Master volume 0–100 (UI steps by 10).
     volume: int = 80
     # "upper" → letters render as A-Z; "lower" → a-z.

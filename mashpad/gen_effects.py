@@ -17,7 +17,7 @@ from pathlib import Path
 
 import numpy as np
 
-from mashpad.audio import repo_root
+from mashpad.paths import app_root
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -173,7 +173,7 @@ def main(argv=None) -> None:
     )
     args = parser.parse_args(argv)
 
-    out_dir = repo_root() / "sounds" / "effects"
+    out_dir = app_root() / "sounds" / "effects"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     effects = _build_effects()
@@ -186,7 +186,7 @@ def main(argv=None) -> None:
             skipped += 1
             continue
         _write_wav(out_path, samples)
-        rel = out_path.relative_to(repo_root())
+        rel = out_path.relative_to(app_root())
         print(f"  wrote {rel}")
         written += 1
 

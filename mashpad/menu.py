@@ -12,7 +12,7 @@ import random
 import pygame
 
 import mashpad
-from mashpad import combos, config, paths, settings as settings_mod
+from mashpad import combos, config, settings as settings_mod
 
 # Menu font size (px) — a couch-readable slice of the item glyph font.
 MENU_FONT_PX = 48
@@ -29,9 +29,6 @@ _ROW_PHRASES = 4
 _ROW_QUIT = 5
 _ROW_COUNT = 6
 
-# Raccoon-amount order for the Less/Normal/Lots stepper.
-_RACCOON_ORDER = ("less", "normal", "lots")
-
 
 class _SampleWord:
     """Minimal spec stand-in: Audio.play_for only reads .spoken_name."""
@@ -43,15 +40,14 @@ class _SampleWord:
 class Menu:
     """Grown-up options overlay driven entirely by the keyboard."""
 
-    def __init__(self, settings, audio, font_path) -> None:
+    def __init__(self, settings, audio, font_path, save_path) -> None:
         self._settings = settings
         self._audio = audio
         self._font = pygame.font.Font(str(font_path), MENU_FONT_PX)
         self._small_font = pygame.font.Font(str(font_path), ABOUT_FONT_PX)
         self._rng = random.Random()  # for auditioning sample words
-        # settings.json is writable state → data_dir() (repo root in dev/Pi,
-        # %APPDATA%\mashpad in a frozen Windows build).
-        self._save_path = paths.data_dir() / config.SETTINGS_FILE
+        # settings.json is writable state — caller provides path.
+        self._save_path = save_path
         self._visible = False
         self._selected = 0
 
@@ -124,8 +120,8 @@ class Menu:
     # --------------------------------------------------------------- row logic
 
     def _voice_options(self):
-        """Ordered Voice-row values: concrete voices, then 'random', 'cycle'."""
-        return list(self._audio.voices) + ["random", "cycle"]
+        """Ordered Voice-row values: concrete voices, then VOICE_MODE_RANDOM, VOICE_MODE_CYCLE."""
+        return list(self._audio.voices) + [settings_mod.VOICE_MODE_RANDOM, settings_mod.VOICE_MODE_CYCLE]
 
     def _step_voice(self, direction: int) -> None:
         options = self._voice_options()
@@ -139,8 +135,8 @@ class Menu:
         value = options[idx]
         self._settings.voice_mode = value
         self._save()
-        # Audition a specific voice so grown-ups hear the pack; none for Random/Cycle.
-        if value not in ("random", "cycle"):
+        # Audition a specific voice so grown-ups hear the pack; none for VOICE_MODE_RANDOM/VOICE_MODE_CYCLE.
+        if value not in (settings_mod.VOICE_MODE_RANDOM, settings_mod.VOICE_MODE_CYCLE):
             self._audio.play_for(_SampleWord("hello"), self._rng, voice=value)
 
     def _step_volume(self, direction: int) -> None:
@@ -159,11 +155,11 @@ class Menu:
 
     def _step_raccoons(self, direction: int) -> None:
         try:
-            idx = _RACCOON_ORDER.index(self._settings.raccoon_amount)
+            idx = settings_mod.RACCOON_AMOUNTS.index(self._settings.raccoon_amount)
         except ValueError:
             idx = 1  # "normal"
-        idx = max(0, min(len(_RACCOON_ORDER) - 1, idx + direction))  # clamp, no wrap
-        self._settings.raccoon_amount = _RACCOON_ORDER[idx]
+        idx = max(0, min(len(settings_mod.RACCOON_AMOUNTS) - 1, idx + direction))  # clamp, no wrap
+        self._settings.raccoon_amount = settings_mod.RACCOON_AMOUNTS[idx]
         self._save()
 
     def _step_phrases(self) -> None:
@@ -178,12 +174,12 @@ class Menu:
 
     def _voice_label(self) -> str:
         v = self._settings.voice_mode
-        if v == "random":
+        if v == settings_mod.VOICE_MODE_RANDOM:
             return "Random"
-        if v == "cycle":
+        if v == settings_mod.VOICE_MODE_CYCLE:
             return "Cycle"
         # Friendly label for a known pack; unknown packs fall back to name.title().
-        return config.VOICE_INFO.get(v, (v.title(), None))[0]
+        return config.voice_label(v)
 
     def _rows(self):
         """(label, value) pairs, in draw order."""

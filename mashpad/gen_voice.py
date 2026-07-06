@@ -17,7 +17,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from mashpad.audio import repo_root
+from mashpad.paths import app_root
 from mashpad import config, imagepack
 
 # ── Vocabulary ────────────────────────────────────────────────────────────────
@@ -44,7 +44,7 @@ def _vocabulary() -> list[tuple[str, str]]:
     # Add distinct spoken words from the image pack, skipping words already in
     # the vocabulary.  raccoon1..raccoon13 → one clip: raccoon.wav.
     existing = {stem for stem, _ in pairs}
-    images_dir = repo_root() / "assets" / config.IMAGES_DIR_NAME
+    images_dir = app_root() / "assets" / config.IMAGES_DIR_NAME
     for entry in imagepack.scan(images_dir):
         if entry.spoken not in existing:
             pairs.append((entry.spoken, entry.spoken))
@@ -151,7 +151,7 @@ def main(argv=None) -> None:
 
     model_path = _resolve_piper_model(args.voice) if args.engine == "piper" else ""
 
-    out_dir = repo_root() / "sounds" / "voice"
+    out_dir = app_root() / "sounds" / "voice"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     vocab = _vocabulary()
@@ -167,7 +167,7 @@ def main(argv=None) -> None:
             _generate_piper(text, out_path, model_path)
         else:
             _generate_espeak(text, out_path)
-        rel = out_path.relative_to(repo_root())
+        rel = out_path.relative_to(app_root())
         print(f"  wrote {rel}")
         written += 1
 
