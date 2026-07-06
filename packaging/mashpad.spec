@@ -16,6 +16,13 @@ _voice_clips = list((REPO / "sounds" / "voice").rglob("*.ogg"))
 if not _voice_clips:
     raise SystemExit("mashpad.spec: sounds/voice contains no .ogg clips — voice packs missing from this worktree")
 
+# The piano-melody notes are gitignored and generated at build time (gen_notes),
+# not committed like the voice packs. A build that skipped that step would ship
+# the default piano mode with no note clips — fail loudly so it isn't released.
+_note_clips = list((REPO / "sounds" / "notes").glob("*.wav"))
+if not _note_clips:
+    raise SystemExit("mashpad.spec: sounds/notes contains no .wav clips — run `python -m mashpad.gen_notes` before building")
+
 a = Analysis(
     [str(REPO / "packaging" / "launcher.py")],
     pathex=[str(REPO)],
