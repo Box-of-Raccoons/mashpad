@@ -74,14 +74,11 @@ def _spawn(field: ItemField, spec, pos, now: float, font, audio: Audio,
 
     Every allowed spawn advances the voice selector, then plays the clip in the
     now-current voice (letters honour *letter_case* when their surface is built).
-    Also feeds the phrase director: a cap force-fade (pre-checked here so
-    items.py semantics are untouched) arms 'screenfull', and the spawn itself —
-    with the live image count — drives hello / fun / raccoons.
+    Also feeds the phrase director: if spawn force-faded a live item to enforce
+    the MAX_ITEMS cap, arms 'screenfull'; the spawn itself — with the live image
+    count — drives hello / fun / raccoons.
     """
-    live_before = [i for i in field.items if i.state(now) != items.DEAD]
-    if len(live_before) >= config.MAX_ITEMS:
-        director.note_cap_hit(now)
-    item = field.spawn(spec, pos, now)
+    item, forced_fade = field.spawn(spec, pos, now)
     item.surface = render.build_item_surface(spec, font, images, letter_case=letter_case)
     selector.on_keystroke()
     audio.play_for(spec, rng, voice=selector.current())
@@ -90,6 +87,8 @@ def _spawn(field: ItemField, spec, pos, now: float, font, audio: Audio,
         if i.state(now) != items.DEAD and i.spec.kind == "image"
     )
     director.note_spawn(now, raccoons)
+    if forced_fade:
+        director.note_cap_hit(now)
 
 
 def main(argv=None) -> None:
@@ -276,7 +275,7 @@ def main(argv=None) -> None:
             # nothing else can be armed before the first input dismisses it. Rotate
             # the voice first (cycle mode) so the comment speaks in the new voice.
             if app_settings.phrases and not menu.visible:
-                trigger = director.poll()
+                trigger = director.poll(now)
                 if trigger is not None:
                     selector.on_trigger()
                     print(f"[mashpad] phrase: {trigger} ({selector.current() or 'default'})")

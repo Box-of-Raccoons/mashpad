@@ -166,6 +166,40 @@ def test_cycle_trigger_no_genders_round_robin():
 
 
 # ---------------------------------------------------------------------------
+# Cycle mode — unknown-gender voice participates in rotation (Fix 3)
+# ---------------------------------------------------------------------------
+
+def test_cycle_unknown_gender_selected_within_one_rotation():
+    """An unknown-gender voice is accepted as a gender-change candidate and is
+    selected within one full rotation through all voices.
+    """
+    voices = ["m1", "m2", "m3", "f1", "f2", "f3", "unk"]
+    genders = {
+        "m1": "male",   "m2": "male",   "m3": "male",
+        "f1": "female", "f2": "female", "f3": "female",
+        # "unk" intentionally absent → gender is None
+    }
+    sel = VoiceSelector(voices, "cycle", genders, _rng())
+    assert sel.current() == "m1"
+    selected = []
+    for _ in range(len(voices)):
+        sel.on_trigger()
+        selected.append(sel.current())
+    assert "unk" in selected, "unknown-gender voice was never selected in one full rotation"
+
+
+def test_cycle_known_gender_alternation_unchanged_with_six_voices():
+    """The 6-voice all-known male/female alternation is unaffected by the fix."""
+    sel = VoiceSelector(_MF, "cycle", _MF_GENDERS, _rng())
+    assert sel.current() == "m1"
+    genders_seq = []
+    for _ in range(6):
+        sel.on_trigger()
+        genders_seq.append(_MF_GENDERS[sel.current()])
+    assert genders_seq == ["female", "male", "female", "male", "female", "male"]
+
+
+# ---------------------------------------------------------------------------
 # Purity
 # ---------------------------------------------------------------------------
 

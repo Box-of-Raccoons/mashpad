@@ -91,7 +91,12 @@ class VoiceSelector:
         for step in range(1, n + 1):
             idx = (self._cycle_index + step) % n
             g = self._genders.get(self._voices[idx])
-            if cur_gender is not None and g is not None and g != cur_gender:
+            # Accept when: next voice has unknown gender (it may be a gender change,
+            # and excluding it forever is worse), OR the current voice's gender is
+            # unknown (any next voice is a valid step), OR genders differ.
+            # Reduces to `g != cur_gender` when all genders are known — same
+            # alternation as before for the six curated packs.
+            if g is None or cur_gender is None or g != cur_gender:
                 chosen = idx
                 break
         if chosen is None:

@@ -19,7 +19,9 @@ PALETTE = [
 # Names of the eight shapes the app can spawn.
 SHAPES = ["circle", "square", "triangle", "star", "heart", "diamond", "pentagon", "ring"]
 
-# Maximum number of live (non-dead) items on screen at once.
+# Cap on non-fading items: each spawn past this force-fades the oldest, so the
+# on-screen total can briefly exceed it by ~BUCKET_REFILL_PER_S × FADE_S while
+# they fade out.
 MAX_ITEMS = 20
 
 # Target frames per second for the main render loop.
@@ -120,3 +122,10 @@ SLOWDOWN_WINDOW_S = 3.0
 
 # Idle seconds with no spawn after which the next spawn re-triggers "hello".
 HELLO_IDLE_S = 300.0
+
+# Seconds an armed phrase trigger stays valid before it silently expires.
+# Must exceed PHRASE_COOLDOWN_S so a trigger armed during a cooldown still gets
+# one shot after the cooldown opens (45 > 30).  Triggers that are continuously
+# re-armed (e.g. raccoons pile still on screen) refresh their armed_time each
+# re-arm and so never expire.  'hello' is exempt from this TTL.
+PHRASE_ARM_TTL_S = 45.0

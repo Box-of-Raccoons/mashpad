@@ -288,3 +288,46 @@ def test_item_surface_slot():
     assert item.surface is None
     item.surface = "dummy"
     assert item.surface == "dummy"
+
+
+# ---------------------------------------------------------------------------
+# spawn() return value — forced_fade flag (Fix 2)
+# ---------------------------------------------------------------------------
+
+def test_spawn_reports_forced_fade_when_cap_hit():
+    """spawn returns forced_fade=True when it force-fades the oldest item."""
+    field = ItemField()
+    spec = ItemSpec(kind="shape", name="circle", color=(0, 255, 0))
+    now = 0.0
+    for i in range(config.MAX_ITEMS):
+        field.spawn(spec, (i, 0), now)
+    _, forced = field.spawn(spec, (99, 0), now)
+    assert forced is True
+
+
+def test_spawn_no_force_fade_when_all_items_already_fading():
+    """When all live items are already fading, spawn does not force-fade any
+    and reports forced_fade=False."""
+    field = ItemField()
+    spec = ItemSpec(kind="shape", name="circle", color=(0, 255, 0))
+    now = 0.0
+    for i in range(config.MAX_ITEMS):
+        field.spawn(spec, (i, 0), now)
+    # Force-fade every item so none are eligible for a cap-triggered fade.
+    for item in field.items:
+        item.force_fade(now)
+    # All MAX_ITEMS items are live (FADING), so the cap condition triggers —
+    # but the inner scan finds no non-fading candidate.
+    _, forced = field.spawn(spec, (99, 0), now)
+    assert forced is False
+
+
+def test_spawn_no_force_fade_below_cap():
+    """spawn returns forced_fade=False when the field is below MAX_ITEMS."""
+    field = ItemField()
+    spec = ItemSpec(kind="shape", name="circle", color=(0, 255, 0))
+    now = 0.0
+    for i in range(config.MAX_ITEMS - 1):
+        field.spawn(spec, (i, 0), now)
+    _, forced = field.spawn(spec, (99, 0), now)
+    assert forced is False
