@@ -18,6 +18,12 @@ SPLASH_HEIGHT_FRAC = 0.55
 # Scale-pulse amplitude (±) and period in seconds.
 PULSE_AMPLITUDE = 0.03
 PULSE_PERIOD_S = 1.2
+# Discrete phase steps per pulse period. The pulse is quantised to these so the
+# size cache holds at most PULSE_STEPS surfaces (~2 px between adjacent sizes —
+# visually indistinguishable from the continuous curve at ±3%). Unquantised, a
+# ~594 px base spans ~37 integer sizes ≈ 50 MB of cached RGBA on a 1080p screen;
+# quantised it is ≤16 (fewer after the sine's symmetry dedups), freed on dismiss.
+PULSE_STEPS = 16
 
 
 class Splash:
@@ -26,6 +32,12 @@ class Splash:
     def __init__(self, screen) -> None:
         self._visible = False
         self._base = None
+        # Lazy size-keyed cache: (w, h) → pre-scaled Surface, populated on first
+        # use of each distinct quantised pulse size (see draw()). Bounded by
+        # PULSE_STEPS entries; warm-up is ≤PULSE_STEPS smoothscales during the
+        # first period, steady-state is a dict lookup — zero scaling per frame.
+        # dismiss() frees the cache and the base (the splash never returns).
+        self._frame_cache: dict = {}
         path = paths.app_root() / "assets" / "splash.png"
         try:
             raw = pygame.image.load(str(path)).convert_alpha()
@@ -45,17 +57,30 @@ class Splash:
         return self._visible and self._base is not None
 
     def dismiss(self) -> None:
-        """Hide the splash for good (idempotent)."""
+        """Hide the splash for good (idempotent) and release its surfaces.
+
+        The splash can never come back, so the pre-scaled frames and the base
+        image (up to ~25 MB on a 1080p screen) go back to the allocator now
+        rather than living for the whole session — this matters on a 1 GB Pi.
+        """
         self._visible = False
+        self._frame_cache.clear()
+        self._base = None
 
     def draw(self, screen, now: float) -> None:
         """Draw the pulsing splash centred on *screen* when visible."""
         if not self.visible:
             return
-        pulse = 1.0 + PULSE_AMPLITUDE * math.sin(2.0 * math.pi * now / PULSE_PERIOD_S)
+        # Quantise the phase to PULSE_STEPS so the cache stays small (see above).
+        step = int(now / PULSE_PERIOD_S * PULSE_STEPS) % PULSE_STEPS
+        pulse = 1.0 + PULSE_AMPLITUDE * math.sin(2.0 * math.pi * step / PULSE_STEPS)
         bw, bh = self._base.get_size()
-        img = pygame.transform.smoothscale(
-            self._base, (max(1, int(round(bw * pulse))), max(1, int(round(bh * pulse))))
-        )
+        key = (max(1, int(round(bw * pulse))), max(1, int(round(bh * pulse))))
+        img = self._frame_cache.get(key)
+        if img is None:
+            # First visit to this pixel size — smoothscale once and cache forever.
+            # After one full pulse period every blit is a dict lookup only.
+            img = pygame.transform.smoothscale(self._base, key)
+            self._frame_cache[key] = img
         w, h = screen.get_size()
         screen.blit(img, img.get_rect(center=(w // 2, h // 2)))

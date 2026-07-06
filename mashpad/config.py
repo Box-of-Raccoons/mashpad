@@ -52,6 +52,9 @@ TRAIL_MAX_POINTS = 64
 # Number of pygame mixer channels to allocate.
 MIXER_CHANNELS = 9  # 8 for letters/effects + 1 reserved for reactive phrases
 
+# Effect-clip volume relative to master (voice clips play at 1.0 × master).
+EFFECT_VOLUME = 0.7
+
 # Rendered size (diameter / side) of each item in pixels at scale=1.0.
 ITEM_SIZE_PX = 280
 

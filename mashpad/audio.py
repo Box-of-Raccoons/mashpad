@@ -9,7 +9,8 @@
 #   sounds/voice/<voicename>/<word>-<take>.ogg|.wav   → a named voice pack
 #       (files grouped by <word>; a file with no "-<digits>" suffix is take 1)
 #   sounds/voice/<word>.wav                           → the legacy flat layout,
-#       loaded as a single anonymous voice named "default"
+#       loaded as "default" ONLY when no subdirectory packs are present
+#       (fallback for bare installs; curated packs take priority over robot TTS)
 # The app works with zero packs, flat files only, or several packs.
 
 from __future__ import annotations
@@ -86,7 +87,7 @@ class Audio:
 
         voice=None → use the "default" voice if present, else no voice clip (the
         effect still plays). A voice name not among the loaded packs → no voice
-        clip. Voice clips play at master volume; effects at 0.7 × master.
+        clip. Voice clips play at master volume; effects at EFFECT_VOLUME × master.
         """
         if not self._ok:
             return
@@ -101,7 +102,7 @@ class Audio:
                     self._play(clip)
         if self._effects:
             effect = rng.choice(self._effects)
-            effect.set_volume(0.7 * self._master)
+            effect.set_volume(config.EFFECT_VOLUME * self._master)
             self._play(effect)
 
     def play_phrase(self, trigger: str, rng, voice=None) -> None:
@@ -170,6 +171,12 @@ class Audio:
         Returns ({voice: {word: [Sound]}}, {voice: {trigger: [Sound]}}) — spoken
         words and reactive-phrase clips kept in separate maps so phrase clips are
         never picked as a spoken word.
+
+        Flat files directly under *directory* are a legacy/fallback layout
+        (install.sh generates them via espeak/piper). They are only exposed as a
+        "default" voice when no subdirectory pack was found — if any curated pack
+        is present the robot-TTS flat files are silently ignored so they do not
+        join the random rotation.
         """
         voices: dict[str, dict[str, list]] = {}
         phrases: dict[str, dict[str, list]] = {}
@@ -182,11 +189,12 @@ class Audio:
                 voices[sub.name] = words
             if pack_phrases:
                 phrases[sub.name] = pack_phrases
-        # Legacy flat files directly under sounds/voice/ → the "default" voice.
+        # Legacy flat files — fallback only: skip entirely when any subdir pack
+        # was found so robot-TTS clips never contaminate the curated rotation.
         flat_words, flat_phrases = self._load_pack(directory)
-        if flat_words and "default" not in voices:
+        if flat_words and not voices:
             voices["default"] = flat_words
-        if flat_phrases and "default" not in phrases:
+        if flat_phrases and not phrases:
             phrases["default"] = flat_phrases
         return voices, phrases
 
