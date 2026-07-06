@@ -98,28 +98,34 @@ class Audio:
                 if clip is not None:
                     clip.set_volume(self._master)
                     self._play(clip)
-        if note is not None:
-            self.play_note(note)
-        elif self._effects:
+        # Effect layer: a piano note in piano mode, else a random ding. If a note
+        # was requested but its clip isn't loaded (e.g. gen_notes never ran on
+        # this install), play_note returns False and we fall back to a ding — the
+        # default piano mode must never leave the effect layer silently mute.
+        if (note is None or not self.play_note(note)) and self._effects:
             effect = rng.choice(self._effects)
             effect.set_volume(config.EFFECT_VOLUME * self._master)
             self._play(effect)
 
-    def play_note(self, name: str) -> None:
+    def play_note(self, name: str) -> bool:
         """Play the piano note clip *name* (e.g. 'c5') on a bed channel.
 
         Plays at EFFECT_VOLUME × master (the effect layer's level) and ducks
-        under a speaking phrase like any other bed audio. Unknown name, no notes
-        loaded, or silent mode → no-op (the melody sequence still advanced
-        upstream; an occasional silent skip matches how effects behave).
+        under a speaking phrase like any other bed audio. Returns True when a
+        clip was found and dispatched, False when there was nothing to play
+        (unknown name, no notes loaded, or silent mode) — play_for uses the False
+        return to fall back to a random ding so piano mode is never silent when
+        the note set didn't generate. A busy-channel skip still counts as played
+        (True): we had a note for this spawn, so no duplicate ding.
         """
         if not self._ok:
-            return
+            return False
         sound = self._notes.get(name)
         if sound is None:
-            return
+            return False
         sound.set_volume(config.EFFECT_VOLUME * self._master)
         self._play(sound)
+        return True
 
     def play_phrase(self, trigger: str, rng, voice=None) -> None:
         """Play a random 'phrase-<trigger>-*' clip in *voice*.
