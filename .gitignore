@@ -21,3 +21,6 @@ packaging/dist/
 packaging/out/
 # Playwright-MCP session artifacts (console/page dumps) — never committed.
 .playwright-mcp/
+
+# Superpowers brainstorming visual-companion sessions — never committed.
+.superpowers/
