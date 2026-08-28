@@ -27,3 +27,6 @@ packaging/out/
 
 # Git worktrees for isolated parallel work — never committed.
 .worktrees/
+
+# Local Python virtualenv (PEP 668 means Homebrew python needs one).
+.venv/
