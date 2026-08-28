@@ -13,8 +13,8 @@ import random
 import pygame
 
 from mashpad import (
-    challenge as challenge_mod, codepanel, codetext, combos, config, imagepack,
-    items, keymap, lockdown as lockdown_mod, melodies, paths, render,
+    challenge as challenge_mod, codepanel, codetext, combos, config, counting,
+    imagepack, items, keymap, lockdown as lockdown_mod, melodies, paths, render,
     settings as settings_mod,
 )
 from mashpad.audio import Audio
@@ -92,6 +92,8 @@ def _challenge_stems(round_, level: int, progress: int = 0) -> tuple[str, ...]:
     *progress* as well as the round: "book" is the ask, but the help a child
     stuck on the second O needs is "find the letter O".
     """
+    if round_.kind == "math":
+        return _counting_stems(round_, level)
     if round_.kind == "spell":
         current = round_.answer[min(progress, len(round_.answer) - 1)]
         if level <= 1:
@@ -106,6 +108,29 @@ def _challenge_stems(round_, level: int, progress: int = 0) -> tuple[str, ...]:
     if level == 2 and round_.art:
         return (round_.target, "for", round_.art)   # "B… for… balloon"
     return (round_.target,)
+
+
+def _counting_stems(round_, level: int) -> tuple[str, ...]:
+    """Stems for a counting round: the ask, then the count itself.
+
+    The hints ARE the teaching here, so they count out loud rather than
+    re-asking: the first pile, then the second, then what the two of them make.
+    A group past CHALLENGE_COUNT_ALOUD_MAX is named instead of counted, because
+    twenty clips is seventeen seconds of ducked bed on one hint.
+    """
+    a, op, b = counting.parse(round_.target)
+    if level <= 0:
+        return ("what-is", counting.spoken(a),
+                "plus" if op == "+" else "minus", counting.spoken(b))
+    if level >= 3:
+        return ("makes", counting.spoken_total(round_.target))
+    if op == "+":
+        group = a if level == 1 else b
+    else:
+        group = a if level == 1 else a - b
+    if group > config.CHALLENGE_COUNT_ALOUD_MAX:
+        return ("how-many", counting.spoken(group))
+    return tuple(counting.spoken(n) for n in range(1, group + 1)) or ("0",)
 
 
 def _draw_babyide_tab(screen, font, tab_h: int, width: int, filename: str) -> None:
@@ -265,6 +290,8 @@ def main(argv=None) -> None:
                 pool = (config.SPELL_WORDS_GUIDED
                         if app_settings.answer_style == "guided"
                         else config.SPELL_WORDS_ADVANCED)
+            elif app_settings.challenge == "math":
+                pool = counting.pool(app_settings.math_range)
             return ChallengeDirector(
                 app_settings.challenge, rng,
                 art_names=[e.name for e in _image_entries],
@@ -381,11 +408,8 @@ def main(argv=None) -> None:
             item_scale = config.CHALLENGE_ITEM_SCALE if challenge_on else 1.0
             max_items = (config.CHALLENGE_MAX_ITEMS if challenge_on
                          else config.MAX_ITEMS)
-            slots = 1
-            if (challenge_on and challenge.round is not None
-                    and challenge.round.kind in ("spell", "math")):
-                slots = len(challenge.round.answer)
-            keepout = (render.challenge_keepout(width, height, slots)
+            keepout = (render.challenge_round_keepout(width, height,
+                                                      challenge.round)
                        if challenge_on else None)
 
             for event in pygame.event.get():
@@ -615,10 +639,14 @@ def main(argv=None) -> None:
                 # Target first: under the flying items, over the background, so
                 # the overlay never blocks the smash payoff. Rebuilt from view()
                 # every frame — no render state is held between frames.
+                guided = app_settings.answer_style == "guided"
                 if challenge_view is not None and challenge_view.kind == "spell":
                     render.draw_challenge_slots(
                         screen, challenge_view, slot_font, images, now,
-                        guided=app_settings.answer_style == "guided")
+                        guided=guided)
+                elif challenge_view is not None and challenge_view.kind == "math":
+                    render.draw_challenge_blocks(
+                        screen, challenge_view, slot_font, now, guided=guided)
                 else:
                     render.draw_challenge_target(screen, challenge_view, font,
                                                  images, now)

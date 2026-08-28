@@ -20,7 +20,7 @@ import math
 
 import pygame
 
-from mashpad import config, items
+from mashpad import config, counting, items
 
 # Solid, very dark background — full clear each frame is cheap and avoids trails
 # smearing across frames.
@@ -461,6 +461,20 @@ _ART_CACHE: dict = {}
 _ART_CACHE_MAX = 8
 
 
+def slot_row_width(slots: int) -> int:
+    """Width of a *slots*-wide answer row, the one place that sum is written."""
+    return (slots * config.CHALLENGE_SLOT_PX
+            + max(0, slots - 1) * config.CHALLENGE_SLOT_GAP_PX)
+
+
+def slot_cells(left: float, top: float, slots: int):
+    """Cell rects for an answer row whose top-left corner is (*left*, *top*)."""
+    cell = config.CHALLENGE_SLOT_PX
+    step = cell + config.CHALLENGE_SLOT_GAP_PX
+    return [pygame.Rect(int(round(left + i * step)), int(round(top)), cell, cell)
+            for i in range(slots)]
+
+
 def challenge_slot_layout(width: int, height: int, slots: int):
     """(art rect, [cell rects]) for a *slots*-wide answer row, centred on screen.
 
@@ -469,16 +483,12 @@ def challenge_slot_layout(width: int, height: int, slots: int):
     """
     art = int(round(config.ITEM_SIZE_PX * config.CHALLENGE_WORD_ART_SCALE))
     cell = config.CHALLENGE_SLOT_PX
-    gap = config.CHALLENGE_SLOT_GAP_PX
-    row_w = slots * cell + max(0, slots - 1) * gap
     total_h = art + CHALLENGE_SLOT_ART_GAP_PX + cell
     top = height / 2.0 - total_h / 2.0
     art_rect = pygame.Rect(0, 0, art, art)
     art_rect.center = (int(width // 2), int(round(top + art / 2.0)))
-    row_top = int(round(top + art + CHALLENGE_SLOT_ART_GAP_PX))
-    left = int(round(width / 2.0 - row_w / 2.0))
-    cells = [pygame.Rect(left + i * (cell + gap), row_top, cell, cell)
-             for i in range(slots)]
+    cells = slot_cells(width / 2.0 - slot_row_width(slots) / 2.0,
+                       top + art + CHALLENGE_SLOT_ART_GAP_PX, slots)
     return art_rect, cells
 
 
@@ -560,6 +570,21 @@ def draw_challenge_slots(screen: "pygame.Surface", view, font: "pygame.font.Font
         art.set_alpha(255)
         screen.blit(art, art_rect)
 
+    draw_slot_row(screen, cells, view, color, font, now, guided=guided)
+
+
+def draw_slot_row(screen: "pygame.Surface", cells, view, color,
+                  font: "pygame.font.Font", now: float,
+                  guided: bool = True, reveal: bool = False) -> None:
+    """Draw the answer row itself: filled, current, landing and waiting slots.
+
+    Split out of draw_challenge_slots because a counting round answers into the
+    same widget — one slot for a total under ten, two for a bigger one.
+
+    *reveal* shows the slots still to come even when *guided* is false. It is the
+    ladder's last rung: the round is being handed over, so the answer stops being
+    a secret.
+    """
     won = view.progress >= len(view.answer)
     landing = (view.progress > 0 and view.filled_at is not None
                and now - view.filled_at < config.CHALLENGE_SLOT_LAND_S)
@@ -575,7 +600,7 @@ def draw_challenge_slots(screen: "pygame.Surface", view, font: "pygame.font.Font
         # Advanced shows only what has been won. Lighting the letter the row is
         # waiting on would hand over the answer one slot at a time, which is the
         # guided tier wearing a different coat.
-        show_glyph = filled or guided
+        show_glyph = filled or guided or reveal
 
         if show_glyph:
             glyph = _slot_glyph(text, color, font)
@@ -608,3 +633,316 @@ def draw_challenge_slots(screen: "pygame.Surface", view, font: "pygame.font.Font
                 hot = _slot_glyph(text, (255, 255, 255), font)
                 hot.set_alpha(white)
                 screen.blit(hot, hot.get_rect(center=cell.center))
+
+
+# ---------------------------------------------------------------------------
+# Counting blocks (the math challenge)
+#
+# Flat squares, no new art. The teaching mechanic is the colour pairing: a child
+# who cannot read "3" as a symbol can still see that the blue numeral belongs to
+# the blue pile. Everything here is derived from the target string, so the whole
+# overlay rebuilds from view() with no render state in between.
+# ---------------------------------------------------------------------------
+
+# Colour of the answer slots. Deliberately neither group's colour: the answer is
+# what the two piles make together, not a third pile.
+CHALLENGE_ANSWER_COLOR = (235, 235, 245)
+
+# Gap between a block group and the numeral naming it.
+CHALLENGE_NUM_GAP_PX = 18
+
+# The proper minus sign. The font's hyphen is a third the width of its plus and
+# reads as a dash beside a 96px numeral.
+CHALLENGE_MINUS = "\u2212"
+
+# Smallest separation, in PALETTE steps, between the two group colours. The
+# palette is 12 hues 30 degrees apart, so four steps is 120 degrees: no blue
+# beside azure, whatever the sum.
+CHALLENGE_HUE_SEPARATION = 4
+
+
+def challenge_block_colors(target: str):
+    """The two group colours for *target*, far enough apart in hue to tell apart.
+
+    Derived from the target rather than drawn at round start, so the overlay
+    rebuilds from view() alone. sum(ord(...)) rather than hash(): hash is salted
+    per process, and the same sum must look the same every time it is asked.
+    """
+    n = len(config.PALETTE)
+    seed = sum(ord(c) for c in target)
+    first = seed % n
+    spread = CHALLENGE_HUE_SEPARATION + (seed // n) % (n - 2 * CHALLENGE_HUE_SEPARATION + 1)
+    return config.PALETTE[first], config.PALETTE[(first + spread) % n]
+
+
+def _dimmed(color, alpha: int):
+    """Colour premultiplied toward the background — a dim block with no surface.
+
+    Blocks are flat rectangles, so this is cheaper than an SRCALPHA surface per
+    block per frame, and the overlay draws straight onto the background fill.
+    """
+    f = max(0.0, min(1.0, alpha / 255.0))
+    return tuple(int(round(BACKGROUND[i] + (color[i] - BACKGROUND[i]) * f))
+                 for i in range(3))
+
+
+def _block_grid(n: int, left: float, mid_y: float, size: int, per_row: int,
+                gap: int):
+    """([rects], width) for *n* blocks in rows of *per_row*, centred on mid_y.
+
+    A short last row is centred under the full ones, so nine blocks read as a
+    tidy 5 over 4 rather than a ragged left-aligned stack.
+    """
+    if n <= 0:
+        return [], 0
+    cols = min(n, per_row)
+    width = cols * size + (cols - 1) * gap
+    rows = (n + per_row - 1) // per_row
+    height = rows * size + (rows - 1) * gap
+    top = mid_y - height / 2.0
+    rects = []
+    for i in range(n):
+        row, col = divmod(i, per_row)
+        in_row = min(per_row, n - row * per_row)
+        row_w = in_row * size + (in_row - 1) * gap
+        row_left = left + (width - row_w) / 2.0
+        rects.append(pygame.Rect(int(round(row_left + col * (size + gap))),
+                                 int(round(top + row * (size + gap))),
+                                 size, size))
+    return rects, width
+
+
+def challenge_blocks_layout(width: int, height: int, target: str, slots: int,
+                            guided: bool):
+    """Every rect a counting round draws, laid out as one centred equation.
+
+    Addition is two groups with an operator between them; subtraction is one
+    group whose last blocks are leaving, so it has no second group and no second
+    colour. The answer column is the slot row, with the guided answer pile above
+    it. Groups sit on a single midline and their numerals hang below.
+    """
+    a, op, b = counting.parse(target)
+    size = config.CHALLENGE_BLOCK_PX
+    gap = config.CHALLENGE_BLOCK_GAP_PX
+    per_row = config.CHALLENGE_BLOCK_ROW_MAX
+    mid_y = height / 2.0
+    op_w = config.CHALLENGE_SLOT_PX
+
+    plus = op == "+"
+    result_n = a + b if plus else a - b
+    result_w = 0
+    if guided and result_n:
+        cols = min(result_n, config.CHALLENGE_RESULT_ROW_MAX)
+        result_w = (cols * config.CHALLENGE_RESULT_BLOCK_PX
+                    + (cols - 1) * config.CHALLENGE_RESULT_BLOCK_GAP_PX)
+    answer_w = max(slot_row_width(slots), result_w)
+
+    # Measure first, then place: the whole equation is centred as one run.
+    a_cols = min(a, per_row)
+    a_w = a_cols * size + (a_cols - 1) * gap
+    b_cols = min(b, per_row) if plus else 0
+    b_w = (b_cols * size + (b_cols - 1) * gap) if plus else 0
+    parts = [a_w] + ([op_w, b_w] if plus else []) + [op_w, answer_w]
+    total_w = sum(parts) + config.CHALLENGE_MATH_GAP_PX * (len(parts) - 1)
+    x = width / 2.0 - total_w / 2.0
+
+    blocks_a, _w = _block_grid(a, x, mid_y, size, per_row, gap)
+    a_rect = _bounds(blocks_a)
+    x += a_w + config.CHALLENGE_MATH_GAP_PX
+
+    op_x = None
+    blocks_b, b_rect = [], None
+    if plus:
+        op_x = x + op_w / 2.0
+        x += op_w + config.CHALLENGE_MATH_GAP_PX
+        blocks_b, _w = _block_grid(b, x, mid_y, size, per_row, gap)
+        b_rect = _bounds(blocks_b)
+        x += b_w + config.CHALLENGE_MATH_GAP_PX
+
+    eq_x = x + op_w / 2.0
+    x += op_w + config.CHALLENGE_MATH_GAP_PX
+
+    cells = slot_cells(x + answer_w / 2.0 - slot_row_width(slots) / 2.0,
+                       mid_y - config.CHALLENGE_SLOT_PX / 2.0, slots)
+    result = []
+    if guided and result_n:
+        # The pile sits IN the answer slot, not above it: the child is looking at
+        # the quantity in the place the numeral goes, which is the whole question.
+        result, _w = _block_grid(
+            result_n, x + answer_w / 2.0 - result_w / 2.0, mid_y,
+            config.CHALLENGE_RESULT_BLOCK_PX, config.CHALLENGE_RESULT_ROW_MAX,
+            config.CHALLENGE_RESULT_BLOCK_GAP_PX)
+
+    return {
+        "op": op,
+        "a": a, "b": b,
+        "blocks_a": blocks_a, "blocks_b": blocks_b,
+        "rect_a": a_rect, "rect_b": b_rect,
+        "op_pos": (op_x, mid_y) if op_x is not None else None,
+        "eq_pos": (eq_x, mid_y),
+        "result": result,
+        "cells": cells,
+    }
+
+
+def _bounds(rects):
+    """Bounding rect of *rects*, or a zero rect when there are none."""
+    if not rects:
+        return pygame.Rect(0, 0, 0, 0)
+    box = rects[0].copy()
+    for r in rects[1:]:
+        box.union_ip(r)
+    return box
+
+
+def challenge_count_lit(view, now: float):
+    """(lit_a, lit_b): how many blocks of each group the hint has counted.
+
+    Outside a hint everything is lit — the blocks are the sum, not a quiz. From
+    step 1 the group being counted dims and refills one block per beat, which is
+    the actual skill at this age: one number, one block, one at a time.
+    """
+    a, op, b = counting.parse(view.target)
+    plus = op == "+"
+    if view.step <= 0 or view.step_at is None:
+        return (a, b if plus else 0)
+    beats = int((now - view.step_at) / config.CHALLENGE_COUNT_CADENCE_S) + 1
+    beats = max(0, beats)
+    if not plus:
+        # Step 1 counts the whole group, including the blocks about to leave;
+        # after that only the survivors are counted, which is the answer.
+        scope = a if view.step == 1 else a - b
+        return (min(scope, beats), 0)
+    if view.step == 1:
+        return (min(a, beats), 0)
+    if view.step == 2:
+        return (a, min(b, beats))
+    whole = min(a + b, beats)          # the last rung counts the line end to end
+    return (min(a, whole), max(0, whole - a))
+
+
+def _draw_blocks(screen, rects, color, lit: int, gone_from=None) -> None:
+    """Draw one group: lit blocks in colour, uncounted ones dim, gone ones grey.
+
+    *gone_from* is where a subtraction's blocks start leaving. They drain to grey
+    and drift off their place rather than turning into a second colour, so the
+    group never reads as two piles waiting to be added.
+    """
+    drift = int(round(config.CHALLENGE_BLOCK_PX * config.CHALLENGE_BLOCK_DRIFT))
+    for i, rect in enumerate(rects):
+        going = gone_from is not None and i >= gone_from
+        base = config.CHALLENGE_BLOCK_GONE_COLOR if going else color
+        shown = base if i < lit else _dimmed(base, config.CHALLENGE_BLOCK_DIM_ALPHA)
+        if going:
+            # Shrinking as well as drifting: a plain slide runs a leaving block
+            # into its neighbour the moment a group wraps to a second row, and
+            # sixteen of them then read as one grey smear.
+            rect = rect.inflate(-drift, -drift).move(drift // 2, drift // 2)
+            shown = _dimmed(shown, 170)
+        pygame.draw.rect(screen, shown, rect)
+
+
+def draw_challenge_blocks(screen: "pygame.Surface", view,
+                          font: "pygame.font.Font", now: float,
+                          guided: bool = True) -> None:
+    """Draw a counting round: block groups, their numerals, and the answer row.
+
+    Each group takes its own PALETTE colour and its numeral is drawn in that
+    colour. That pairing is the teaching mechanic, and it is why the numerals are
+    not simply white.
+
+    *guided* adds the answer pile above the slots: the total shown as a quantity
+    of blocks, never as the numeral the child is being asked to find.
+
+    Rebuilt from *view* and *now* every frame; no state survives the call.
+    """
+    if view is None:
+        return
+    layout = challenge_blocks_layout(screen.get_width(), screen.get_height(),
+                                     view.target, len(view.answer), guided)
+    color_a, color_b = challenge_block_colors(view.target)
+    lit_a, lit_b = challenge_count_lit(view, now)
+    plus = layout["op"] == "+"
+
+    _draw_blocks(screen, layout["blocks_a"], color_a, lit_a,
+                 gone_from=None if plus else layout["a"] - layout["b"])
+    if plus:
+        _draw_blocks(screen, layout["blocks_b"], color_b, lit_b)
+
+    def glyph(text, color, center):
+        surf = _slot_glyph(text, color, font)
+        surf.set_alpha(255)
+        screen.blit(surf, surf.get_rect(center=(int(round(center[0])),
+                                                int(round(center[1])))))
+
+    num_y = layout["rect_a"].bottom + CHALLENGE_NUM_GAP_PX + config.CHALLENGE_SLOT_PX // 2
+    if plus:
+        glyph(str(layout["a"]), color_a, (layout["rect_a"].centerx, num_y))
+        glyph(str(layout["b"]), color_b, (layout["rect_b"].centerx, num_y))
+        glyph("+", CHALLENGE_ANSWER_COLOR, layout["op_pos"])
+    else:
+        # One centred line under the group: 5 in the group's colour, then the
+        # minus, then the count leaving in the grey it drains to.
+        _draw_minus_numerals(screen, font, layout, color_a, num_y)
+    glyph("=", CHALLENGE_ANSWER_COLOR, layout["eq_pos"])
+
+    # The answer pile keeps both group colours, so the total reads as "this pile
+    # and that pile, together" rather than as a third, unrelated quantity. It
+    # clears the moment a digit lands in the slot, or the gimme spells the answer
+    # out: either way the numeral now occupies that space.
+    if view.progress == 0 and not view.gimme:
+        for i, rect in enumerate(layout["result"]):
+            from_a = not plus or i < layout["a"]
+            pygame.draw.rect(screen, color_a if from_a else color_b, rect)
+
+    draw_slot_row(screen, layout["cells"], view, CHALLENGE_ANSWER_COLOR, font,
+                  now, guided=False, reveal=view.gimme)
+
+
+def _draw_minus_numerals(screen, font, layout, color_a, num_y) -> None:
+    """'5 - 2' centred under a subtraction's single group."""
+    left = _slot_glyph(str(layout["a"]), color_a, font)
+    dash = _slot_glyph(CHALLENGE_MINUS, CHALLENGE_ANSWER_COLOR, font)
+    right = _slot_glyph(str(layout["b"]), config.CHALLENGE_BLOCK_GONE_COLOR, font)
+    gap = config.CHALLENGE_SLOT_GAP_PX
+    run = left.get_width() + dash.get_width() + right.get_width() + 2 * gap
+    x = layout["rect_a"].centerx - run / 2.0
+    for surf in (left, dash, right):
+        surf.set_alpha(255)
+        screen.blit(surf, surf.get_rect(midleft=(int(round(x)), int(round(num_y)))))
+        x += surf.get_width() + gap
+
+
+def challenge_round_keepout(width: int, height: int, round_):
+    """Keep-out box for whichever overlay *round_* draws, or the plain target box."""
+    if round_ is None:
+        return challenge_keepout(width, height)
+    if round_.kind == "spell":
+        return challenge_keepout(width, height, len(round_.answer))
+    if round_.kind != "math":
+        return challenge_keepout(width, height)
+    layout = challenge_blocks_layout(width, height, round_.target,
+                                     len(round_.answer), True)
+    box = _bounds(layout["blocks_a"] + layout["blocks_b"] + layout["result"]
+                  + layout["cells"])
+    # The numerals are drawn from font metrics, so they are not rects in the
+    # layout. A subtraction's "16 - 15" is three glyphs under a group five
+    # blocks across, and it hangs below all of them.
+    num_y = (layout["rect_a"].bottom + CHALLENGE_NUM_GAP_PX
+             + config.CHALLENGE_SLOT_PX // 2)
+    a, b = layout["a"], layout["b"]
+    if layout["op"] == "+":
+        runs = [(layout["rect_a"].centerx, len(str(a))),
+                (layout["rect_b"].centerx, len(str(b)))]
+    else:
+        runs = [(layout["rect_a"].centerx, len(str(a)) + 1 + len(str(b)))]
+    for centerx, chars in runs:
+        # One full slot per character is generous on purpose: the box only ever
+        # excludes spawn centres, so erring wide costs nothing and erring narrow
+        # drops a glyph on the sum.
+        run = pygame.Rect(0, 0, chars * config.CHALLENGE_SLOT_PX,
+                          config.CHALLENGE_SLOT_PX)
+        run.center = (centerx, num_y)
+        box.union_ip(run)
+    box.inflate_ip(2 * CHALLENGE_SLOT_MARGIN_PX, 2 * CHALLENGE_SLOT_MARGIN_PX)
+    return (float(box.left), float(box.top), float(box.width), float(box.height))

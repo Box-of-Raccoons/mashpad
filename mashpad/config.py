@@ -258,3 +258,40 @@ CHALLENGE_SLOT_LAND_S = 0.45
 # Spelling: size of the word's picture above the slot row, as a fraction of
 # ITEM_SIZE_PX. Big enough to name the word, small enough to leave the row room.
 CHALLENGE_WORD_ART_SCALE = 0.8
+
+
+# Counting blocks: side of one block in pixels, the gap between blocks, and how
+# many sit in a row before the group wraps. Five keeps a group countable at a
+# glance; twenty blocks then read as four rows rather than one long smear.
+CHALLENGE_BLOCK_PX = 44
+CHALLENGE_BLOCK_GAP_PX = 10
+CHALLENGE_BLOCK_ROW_MAX = 5
+
+# Counting blocks: the smaller blocks of the guided answer pile, and how many of
+# those sit in a row. The pile shows the total as a quantity, never as a numeral
+# — the numeral is the thing the child is being asked to find.
+CHALLENGE_RESULT_BLOCK_PX = 24
+CHALLENGE_RESULT_BLOCK_GAP_PX = 6
+CHALLENGE_RESULT_ROW_MAX = 10
+
+# Counting blocks: horizontal gap between the parts of the equation.
+CHALLENGE_MATH_GAP_PX = 44
+
+# Counting blocks: seconds per block while a hint counts a group. Roughly one
+# short digit clip plus UTTERANCE_GAP_S, so the blocks tick along with the
+# voice. They are not sample-synced: speak() does not report clip lengths.
+CHALLENGE_COUNT_CADENCE_S = 0.85
+
+# Counting blocks: the most numbers a hint will count out loud. Twenty clips is
+# seventeen seconds of ducked bed, so a bigger group is simply named instead.
+CHALLENGE_COUNT_ALOUD_MAX = 10
+
+# Counting blocks: alpha of a block the hint has not counted yet, and the grey
+# the subtracted blocks drain to.
+CHALLENGE_BLOCK_DIM_ALPHA = 55
+CHALLENGE_BLOCK_GONE_COLOR = (105, 105, 118)
+
+# Counting blocks: how far a subtracted block drifts off its place, as a
+# fraction of a block. It leaves rather than turning into a second colour, so
+# the group never reads as two piles to add.
+CHALLENGE_BLOCK_DRIFT = 0.35

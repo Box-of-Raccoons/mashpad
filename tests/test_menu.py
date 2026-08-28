@@ -224,7 +224,7 @@ assert a.auditioned, "selecting a concrete voice did not audition it"
 # ---------------------------------------------------------------------------
 
 def test_challenge_row_offers_only_implemented_values():
-    """A challenge must not be selectable before its slice lands (math, today)."""
+    """The row offers exactly the challenges that have shipped, now all five."""
     _ok("""
 from mashpad.menu import IMPLEMENTED_CHALLENGES
 m, s, a = make()
@@ -234,8 +234,7 @@ for _ in range(len(IMPLEMENTED_CHALLENGES) + 2):
     seen.add(s.challenge)
     m.handle_event(key(pygame.K_RIGHT))
 assert seen == set(IMPLEMENTED_CHALLENGES), seen
-assert "spell" in seen, seen
-assert "math" not in seen, seen
+assert "spell" in seen and "math" in seen, seen
 """)
 
 

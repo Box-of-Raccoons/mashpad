@@ -488,3 +488,40 @@ Version bumps to 1.2.0 only at release.
 - **Per-frame overlay cost on the Pi is unmeasured.** A large outlined glyph plus
   a slot row rebuilt every frame is plausible given the existing surface-cache
   discipline, but nothing has been run on hardware.
+
+## Implementation notes (slices 5 and 6, 2026-08-27)
+
+Three things this document specified turned out differently once built. They are
+recorded here rather than edited above, so the reasoning stays visible.
+
+**Guided math shows the total as blocks, not as a ghost numeral.** The design
+implied `answer_style` would ghost the answer digits the way it ghosts spelling
+letters. It does not: ghosting the numeral would hand over the exact symbol the
+mode exists to teach. Guided instead draws an answer pile in the slot, the two
+groups merged into one line with each block keeping its own group colour, so the
+child sees the quantity and still has to name it. Advanced omits the pile.
+
+**The word pool reaches the director through its constructor.** The design had
+word and sum rounds arriving via `force_round`. That cannot work: `poll` starts
+the next round itself after the win beat, so a director fed one round at a time
+strands every round after the first on an empty pool. `ChallengeDirector` now
+takes a `pool`, and a pool entry may carry its own answer, which is what a sum
+needs since "3+2" does not spell "5".
+
+**Random spawns are drawn from the bands outside the keep-out box, not
+rejection-sampled into it.** Rejection was fine for one centred glyph. A
+spelling row or an equation spans most of the screen, and the bounded retry loop
+gave up often enough at that width to drop smash glyphs onto the answer. Band
+sampling is exact and never gives up.
+
+Two things to look at on the Pi, beyond the slice-4 gate that is still open:
+
+* At the 1280x720 windowed default, a wide equation leaves so little spawnable
+  screen that item glyphs lean into it from the edges. At 1920x1080, the Pi's
+  actual mode, the overlay is clear. The keep-out excludes glyph centres, never
+  glyph edges, because a box with full item clearance would cover every
+  spawnable pixel of a 720p screen.
+* The counting hints pop one block per `CHALLENGE_COUNT_CADENCE_S`, chosen to
+  roughly match a digit clip plus `UTTERANCE_GAP_S`. They are not synchronised
+  to the audio: `speak` does not report clip lengths. If the blocks visibly lag
+  or lead the voice, that constant is the knob.
