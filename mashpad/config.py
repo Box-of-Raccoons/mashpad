@@ -231,3 +231,30 @@ CHALLENGE_CONFETTI_N = 10
 # Challenge: confetti size as a fraction of ITEM_SIZE_PX (small enough that a
 # ring of them frames the flooded target instead of burying it).
 CHALLENGE_CONFETTI_SCALE = 0.22
+
+
+# Spelling: the guided word pool. Every word here is spoken by all six shipped
+# voice packs AND is either a sticker in assets/images/ or one of SHAPES, so a
+# round can always show its picture. Adding a word without both is a silent
+# half-round; tests/test_spellwords.py pins that.
+SPELL_WORDS_GUIDED = ["book", "star", "drum", "ring", "hug", "love"]
+
+# Spelling: the words the advanced tier adds to the guided six. Longer, and the
+# slots are blank there, so a bigger bag also means a word repeats less often.
+SPELL_WORDS_ADVANCED = SPELL_WORDS_GUIDED + [
+    "water", "heart", "circle", "square", "balloon", "bubbles",
+]
+
+# Spelling: height of one answer slot in pixels, and the gap between slots. The
+# row is centred, so a 7-letter word (BUBBLES) sets the widest case.
+CHALLENGE_SLOT_PX = 96
+CHALLENGE_SLOT_GAP_PX = 22
+
+# Spelling: seconds a just-filled slot spends landing (a bright flash settling
+# into its colour) before the next slot lights. Without the pause the glow slides
+# from one O of BOOK to an identical O and reads as nothing having happened.
+CHALLENGE_SLOT_LAND_S = 0.45
+
+# Spelling: size of the word's picture above the slot row, as a fraction of
+# ITEM_SIZE_PX. Big enough to name the word, small enough to leave the row room.
+CHALLENGE_WORD_ART_SCALE = 0.8

@@ -230,10 +230,6 @@ CHALLENGE_OUTLINE_PX = 10
 CHALLENGE_ART_GAP_PX = 40
 CHALLENGE_ART_MARGIN_PX = 20
 
-# Random spawn positions are rejection-sampled out of the keep-out box; after
-# this many tries the sample is taken as-is rather than looping forever (a
-# narrow window can leave very little valid area).
-CHALLENGE_SPAWN_TRIES = 12
 
 # Content-addressed cache of built target surfaces, keyed by (text, color,
 # found). NOT render state: nothing here can drift out of sync with view(),
@@ -254,31 +250,73 @@ def challenge_target_color(target: str) -> tuple[int, int, int]:
     return config.PALETTE[ord(target[:1] or "a") % len(config.PALETTE)]
 
 
-def challenge_keepout(width: int, height: int):
-    """(x, y, w, h) box around the centred target that random spawns avoid."""
+def challenge_keepout(width: int, height: int, slots: int = 1):
+    """(x, y, w, h) box around the centred target that random spawns avoid.
+
+    *slots* > 1 is a spelling or sum round: the overlay is then a picture stacked
+    over a row of answer slots, which is far wider and taller than one glyph, so
+    the box grows to cover what is actually drawn. Both come from
+    challenge_slot_layout, so the box and the drawing cannot drift apart.
+    """
     side = config.ITEM_SIZE_PX * config.CHALLENGE_KEEPOUT_SCALE
-    return (width / 2.0 - side / 2.0, height / 2.0 - side / 2.0, side, side)
+    if slots <= 1:
+        return (width / 2.0 - side / 2.0, height / 2.0 - side / 2.0, side, side)
+    art_rect, cells = challenge_slot_layout(width, height, slots)
+    left = min(art_rect.left, cells[0].left) - CHALLENGE_SLOT_MARGIN_PX
+    right = max(art_rect.right, cells[-1].right) + CHALLENGE_SLOT_MARGIN_PX
+    top = art_rect.top - CHALLENGE_SLOT_MARGIN_PX
+    bottom = cells[0].bottom + CHALLENGE_SLOT_MARGIN_PX
+    return (float(left), float(top), float(right - left), float(bottom - top))
+
+
+def _spawn_bands(x0: float, y0: float, x1: float, y1: float, box):
+    """[(area, rect), ...] tiling the spawnable rect minus the keep-out box.
+
+    Four non-overlapping strips: full width above and below the box, then the
+    slivers left and right of it within its own rows. An empty list means the
+    box covers everything the caller may spawn into.
+    """
+    bx0, by0, bw, bh = box
+    bx1, by1 = bx0 + bw, by0 + bh
+    strips = (
+        (x0, y0, x1, min(by0, y1)),                          # above the box
+        (x0, max(by1, y0), x1, y1),                          # below it
+        (x0, max(by0, y0), min(bx0, x1), min(by1, y1)),      # left of it
+        (max(bx1, x0), max(by0, y0), x1, min(by1, y1)),      # right of it
+    )
+    return [((sx1 - sx0) * (sy1 - sy0), (sx0, sy0, sx1, sy1))
+            for sx0, sy0, sx1, sy1 in strips if sx1 > sx0 and sy1 > sy0]
 
 
 def spawn_position(rng, width: int, height: int, half: float, avoid=None):
     """Random on-screen spawn position, kept *half* px clear of every edge.
 
-    With *avoid* set to a keep-out box the sample is rejected and re-drawn while
-    it lands inside, so a smash glyph never covers the answer. Pure apart from
-    *rng*; with avoid=None it is exactly the uniform draw the smash mode has
-    always used.
+    With *avoid* set to a keep-out box, a sample landing inside is redrawn from
+    the bands outside it rather than rejection-sampled. Rejection was fine for a
+    single centred glyph but not for a spelling row: that box spans most of the
+    screen, so a bounded retry loop gave up often enough to drop glyphs straight
+    onto the answer. Bands are exact, uniform, and cost one extra draw.
+
+    Pure apart from *rng*; with avoid=None it is exactly the uniform draw the
+    smash mode has always used.
     """
     x = rng.uniform(half, width - half)
     y = rng.uniform(half, height - half)
     if avoid is None:
         return (x, y)
     ax, ay, aw, ah = avoid
-    for _ in range(CHALLENGE_SPAWN_TRIES):
-        if not (ax <= x <= ax + aw and ay <= y <= ay + ah):
-            return (x, y)
-        x = rng.uniform(half, width - half)
-        y = rng.uniform(half, height - half)
-    return (x, y)
+    if not (ax <= x <= ax + aw and ay <= y <= ay + ah):
+        return (x, y)
+    bands = _spawn_bands(half, half, width - half, height - half, avoid)
+    if not bands:
+        return (x, y)      # the box swallows the screen; nowhere else to put it
+    pick = rng.uniform(0.0, sum(area for area, _rect in bands))
+    for area, (bx0, by0, bx1, by1) in bands:
+        pick -= area
+        if pick <= 0.0:
+            return (rng.uniform(bx0, bx1), rng.uniform(by0, by1))
+    _area, (bx0, by0, bx1, by1) = bands[-1]
+    return (rng.uniform(bx0, bx1), rng.uniform(by0, by1))
 
 
 def _dilation_offsets(ring: int):
@@ -374,3 +412,199 @@ def draw_challenge_target(screen: "pygame.Surface", view, font: "pygame.font.Fon
     if rect.right > w - CHALLENGE_ART_MARGIN_PX:
         rect.right = w - CHALLENGE_ART_MARGIN_PX
     screen.blit(art, rect)
+
+
+# ---------------------------------------------------------------------------
+# Challenge slot row (spelling; the two-digit sums of the math tier reuse it)
+#
+# Same discipline as the target overlay above: the geometry the spawner avoids
+# and the geometry drawn here come from one function, and every surface is
+# content-addressed so nothing cached can disagree with view().
+# ---------------------------------------------------------------------------
+
+# Breathing room the keep-out box leaves around the whole slot overlay.
+# Deliberately thinner than a scaled item's half-width: giving the row the same
+# clearance the single centred glyph gets would cover every spawnable pixel of a
+# 1280x720 screen for a seven-letter word. Glyph centres stay off the row; their
+# edges may still clip it.
+CHALLENGE_SLOT_MARGIN_PX = 30
+
+# Gap between the word's picture and the row of slots below it.
+CHALLENGE_SLOT_ART_GAP_PX = 28
+
+# Alpha of a slot the child has not reached yet, and of its underline bar. Low
+# enough that the current slot is the only bright thing in the row.
+CHALLENGE_SLOT_GHOST_ALPHA = 70
+CHALLENGE_SLOT_BAR_ALPHA = 90
+
+# Underline bar height in pixels, and its gap below the glyph cell.
+CHALLENGE_SLOT_BAR_PX = 8
+CHALLENGE_SLOT_BAR_GAP_PX = 6
+
+# Alpha of a letter already in place. Held below full so the current slot is
+# brighter than a completed one at EVERY point of its pulse, not just at the
+# peak: the glow is the instruction, and a trough that matches the finished
+# letters leaves nothing telling the child where to look. The word floods to 255
+# the moment it is complete, which is the win.
+CHALLENGE_SLOT_FILLED_ALPHA = 205
+
+# Alpha range of the white overlay that makes the current slot glow, and the
+# flash a slot lands with. White over the colour rather than a re-render: the
+# perf contract at the top of this file forbids a font.render per frame.
+CHALLENGE_SLOT_GLOW_MIN_ALPHA = 60
+CHALLENGE_SLOT_GLOW_ALPHA = 180
+CHALLENGE_SLOT_LAND_ALPHA = 255
+
+_SLOT_CACHE: dict = {}
+_SLOT_CACHE_MAX = 48
+_ART_CACHE: dict = {}
+_ART_CACHE_MAX = 8
+
+
+def challenge_slot_layout(width: int, height: int, slots: int):
+    """(art rect, [cell rects]) for a *slots*-wide answer row, centred on screen.
+
+    The picture sits above the row and the pair is centred as one block, so a
+    two-letter word and BUBBLES both land in the middle of the screen.
+    """
+    art = int(round(config.ITEM_SIZE_PX * config.CHALLENGE_WORD_ART_SCALE))
+    cell = config.CHALLENGE_SLOT_PX
+    gap = config.CHALLENGE_SLOT_GAP_PX
+    row_w = slots * cell + max(0, slots - 1) * gap
+    total_h = art + CHALLENGE_SLOT_ART_GAP_PX + cell
+    top = height / 2.0 - total_h / 2.0
+    art_rect = pygame.Rect(0, 0, art, art)
+    art_rect.center = (int(width // 2), int(round(top + art / 2.0)))
+    row_top = int(round(top + art + CHALLENGE_SLOT_ART_GAP_PX))
+    left = int(round(width / 2.0 - row_w / 2.0))
+    cells = [pygame.Rect(left + i * (cell + gap), row_top, cell, cell)
+             for i in range(slots)]
+    return art_rect, cells
+
+
+def _slot_glyph(text: str, color, font: "pygame.font.Font"):
+    """One slot's glyph, cached by (text, colour) — never re-rendered per frame."""
+    key = (text, color)
+    surf = _SLOT_CACHE.get(key)
+    if surf is None:
+        if len(_SLOT_CACHE) >= _SLOT_CACHE_MAX:
+            _SLOT_CACHE.clear()
+        surf = _SLOT_CACHE[key] = font.render(text, True, color)
+    return surf
+
+
+def _word_art_surface(name: str, color, size: int, images: "dict | None"):
+    """The word's picture at *size*: its sticker if one exists, else its shape.
+
+    BOOK and DRUM have PNG stickers; STAR and RING are shapes with no art file,
+    so they are drawn rather than loaded. A word that is neither returns None and
+    the round simply shows its slot row.
+    """
+    key = (name, color, size)
+    surf = _ART_CACHE.get(key)
+    if surf is not None:
+        return surf
+    built = None
+    art = images.get(name) if images else None
+    if art is not None:
+        built = pygame.transform.smoothscale(art, (size, size))
+    elif name in config.SHAPES:
+        built = pygame.Surface((size, size), pygame.SRCALPHA)
+        _draw_shape(built, name, color)
+    if built is None:
+        return None
+    if len(_ART_CACHE) >= _ART_CACHE_MAX:
+        _ART_CACHE.clear()
+    _ART_CACHE[key] = built
+    return built
+
+
+def challenge_slot_glow(now: float) -> float:
+    """0.0-1.0 breathing envelope for the current slot's white overlay."""
+    return (math.sin(2.0 * math.pi * now / CHALLENGE_PULSE_PERIOD_S) + 1.0) / 2.0
+
+
+def _draw_slot_bar(screen, cell, color, alpha: int) -> None:
+    """The underline under one slot — the row's 'here is a letter' skeleton."""
+    bar = pygame.Surface((cell.width, CHALLENGE_SLOT_BAR_PX), pygame.SRCALPHA)
+    bar.fill(color)
+    bar.set_alpha(alpha)
+    screen.blit(bar, (cell.left, cell.bottom + CHALLENGE_SLOT_BAR_GAP_PX))
+
+
+def draw_challenge_slots(screen: "pygame.Surface", view, font: "pygame.font.Font",
+                         images: "dict | None", now: float,
+                         guided: bool = True) -> None:
+    """Draw a spelling round: the word's picture over a row of answer slots.
+
+    Completed letters sit in full colour, the current slot breathes white, and
+    everything else stays dim — the glow is the instruction, so exactly one thing
+    in the row may be bright. *guided* shows the letters still to come as ghosts;
+    advanced shows only their bars, so the picture and the announcer carry it.
+
+    A just-filled slot flashes and settles for CHALLENGE_SLOT_LAND_S before the
+    next one lights. That pause is the whole reason View carries filled_at: in
+    BOOK the glow would otherwise slide from one O to an identical O, which reads
+    as nothing having happened.
+
+    Rebuilt from *view* and *now* every frame; no state survives the call.
+    """
+    if view is None:
+        return
+    color = challenge_target_color(view.target)
+    art_rect, cells = challenge_slot_layout(
+        screen.get_width(), screen.get_height(), len(view.answer))
+
+    art = _word_art_surface(view.art, color, art_rect.width, images) if view.art else None
+    if art is not None:
+        art.set_alpha(255)
+        screen.blit(art, art_rect)
+
+    won = view.progress >= len(view.answer)
+    landing = (view.progress > 0 and view.filled_at is not None
+               and now - view.filled_at < config.CHALLENGE_SLOT_LAND_S)
+    land_left = (1.0 - (now - view.filled_at) / config.CHALLENGE_SLOT_LAND_S
+                 if landing else 0.0)
+
+    for i, cell in enumerate(cells):
+        text = view.answer[i].upper()
+        filled = i < view.progress
+        # While a slot lands, the next one stays dark: two bright slots at once
+        # would leave the child guessing which one the glow means.
+        current = i == view.progress and not landing
+        # Advanced shows only what has been won. Lighting the letter the row is
+        # waiting on would hand over the answer one slot at a time, which is the
+        # guided tier wearing a different coat.
+        show_glyph = filled or guided
+
+        if show_glyph:
+            glyph = _slot_glyph(text, color, font)
+            if current or won:
+                alpha = 255
+            elif filled:
+                alpha = CHALLENGE_SLOT_FILLED_ALPHA
+            else:
+                alpha = CHALLENGE_SLOT_GHOST_ALPHA
+            glyph.set_alpha(alpha)
+            screen.blit(glyph, glyph.get_rect(center=cell.center))
+
+        white = 0
+        if landing and i == view.progress - 1:
+            white = int(round(CHALLENGE_SLOT_LAND_ALPHA * land_left))
+        elif current:
+            white = int(round(CHALLENGE_SLOT_GLOW_MIN_ALPHA
+                              + (CHALLENGE_SLOT_GLOW_ALPHA
+                                 - CHALLENGE_SLOT_GLOW_MIN_ALPHA)
+                              * challenge_slot_glow(now)))
+
+        _draw_slot_bar(screen, cell, color,
+                       255 if current else CHALLENGE_SLOT_BAR_ALPHA)
+        if white > 0:
+            # The bar carries the glow too, so an advanced slot with no letter in
+            # it is still unmistakably the one being asked for.
+            if current:
+                _draw_slot_bar(screen, cell, (255, 255, 255), white)
+            if show_glyph:
+                hot = _slot_glyph(text, (255, 255, 255), font)
+                hot.set_alpha(white)
+                screen.blit(hot, hot.get_rect(center=cell.center))

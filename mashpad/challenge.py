@@ -24,8 +24,8 @@ CORRECT = "correct"    # the round is won
 _LETTERS = "abcdefghijklmnopqrstuvwxyz"
 _DIGITS = "0123456789"
 
-# Target pools by challenge kind. Word and sum rounds arrive through
-# force_round() instead, because their pools are supplied by the caller.
+# Target pools by challenge kind. Word and sum pools depend on grown-up settings
+# the caller owns, so those arrive through the constructor's *pool* instead.
 _POOLS = {"letter": _LETTERS, "number": _DIGITS}
 
 
@@ -48,6 +48,11 @@ class View:
     step: int                    # current ladder step, 0-3
     gimme: bool                  # True once any key wins
     art: str | None
+    # Wall time the last slot was filled. The renderer needs it to land a
+    # completed letter before the next one lights: in BOOK the glow would
+    # otherwise slide from one O to an identical O and read as nothing
+    # happening. None until the first fill of the round.
+    filled_at: float | None = None
 
 
 def _art_index(art_names):
@@ -66,15 +71,19 @@ def _art_index(art_names):
 class ChallengeDirector:
     """Owns one round at a time: the ask, the judging, and the hint ladder."""
 
-    def __init__(self, kind: str, rng, art_names=()) -> None:
+    def __init__(self, kind: str, rng, art_names=(), pool=None) -> None:
         self._kind = kind
         self._rng = rng
-        self._pool = _POOLS.get(kind, "")
+        # The pool has to live in here rather than being fed a round at a time:
+        # poll() restarts the round itself after the win beat, and a director
+        # with nothing to draw from would strand every round after the first.
+        self._pool = list(pool) if pool is not None else _POOLS.get(kind, "")
         self._art = _art_index(art_names)
         self._bag: list[str] = []
         self._last_target: str | None = None
         self._round: Round | None = None
         self._progress = 0
+        self._filled_at: float | None = None
         # Ladder state. _elapsed is round time, not wall time: it stops while
         # paused (grown-up menu, splash) and while parked (nobody is playing).
         self._step = 0
@@ -117,6 +126,7 @@ class ChallengeDirector:
         """Draw the next target and arm its ask (delivered by the next poll)."""
         self._round = self._build(self._draw())
         self._progress = 0
+        self._filled_at = None
         self._won_at = None
         self._parked = False
         self._last_input_at = now
@@ -131,8 +141,14 @@ class ChallengeDirector:
         """
         self._round = self._build(target, answer)
         self._progress = 0
+        self._filled_at = None
 
-    def _build(self, target: str, answer=None) -> Round:
+    def _build(self, target, answer=None) -> Round:
+        # A pool entry is either a bare target ("book"), whose answer is its own
+        # letters, or a (target, answer) pair ("3+2", ("5",)) for an ask the
+        # target does not spell out.
+        if answer is None and not isinstance(target, str):
+            target, answer = target
         return Round(
             kind=self._kind,
             target=target,
@@ -141,13 +157,18 @@ class ChallengeDirector:
         )
 
     def _art_for(self, target: str) -> "str | None":
+        # A word round IS its own picture — "book" its sticker, "star" the shape.
+        # Falling through to the first-letter index would stand a sandwich beside
+        # STAR, because no star.png exists.
+        if len(target) > 1:
+            return target if target.isalpha() else None
         if target in self._art.get(target[:1], ()):
             return target                      # the target IS a sticker (word rounds)
         options = self._art.get(target[:1].lower())
         return self._rng.choice(options) if options else None
 
-    def _draw(self) -> str:
-        """Next target from a shuffled bag, never the same one twice running."""
+    def _draw(self):
+        """Next entry from a shuffled bag, never the same one twice running."""
         if not self._bag:
             self._bag = list(self._pool)
             self._rng.shuffle(self._bag)
@@ -213,6 +234,7 @@ class ChallengeDirector:
             return MISS
 
         self._progress += 1
+        self._filled_at = now
         if self._progress >= len(self._round.answer):
             self._won_at = now
             return CORRECT
@@ -276,4 +298,5 @@ class ChallengeDirector:
             step=self._step,
             gimme=self._step >= len(config.CHALLENGE_LADDER),
             art=self._round.art,
+            filled_at=self._filled_at,
         )
