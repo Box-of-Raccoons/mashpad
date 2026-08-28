@@ -241,6 +241,7 @@ CHALLENGE_SPAWN_TRIES = 12
 # of this file forbids re-rendering a 280px glyph (plus nine blits) every frame.
 # Cleared wholesale past a handful of entries — a round needs at most two.
 _TARGET_CACHE: dict = {}
+_DILATION_CACHE: dict = {}
 _TARGET_CACHE_MAX = 6
 
 
@@ -280,6 +281,27 @@ def spawn_position(rng, width: int, height: int, half: float, avoid=None):
     return (x, y)
 
 
+def _dilation_offsets(ring: int):
+    """Offsets whose union thickens a glyph into an even outline, cached per ring.
+
+    Sampling only the eight points of a square (the first cut) left stair-steps
+    wherever a stroke curved: at a tight bend the translated copies stop
+    overlapping and the union notches. A filled disc samples every pixel in the
+    radius instead: a 2px lattice still left ticks on near-vertical edges, where
+    a one-pixel gap in the sampling is a one-pixel step in the outline. Cost
+    lands once per target, not per frame — _TARGET_CACHE holds the result.
+    """
+    offsets = _DILATION_CACHE.get(ring)
+    if offsets is None:
+        offsets = _DILATION_CACHE[ring] = [
+            (dx, dy)
+            for dy in range(-ring, ring + 1)
+            for dx in range(-ring, ring + 1)
+            if (dx or dy) and dx * dx + dy * dy <= ring * ring
+        ]
+    return offsets
+
+
 def _target_surface(text: str, color, found: bool, font: "pygame.font.Font"):
     """Build (or reuse) the target glyph: a flooded fill, or a hollow outline."""
     key = (text, color, found)
@@ -293,10 +315,8 @@ def _target_surface(text: str, color, found: bool, font: "pygame.font.Font"):
         ring = CHALLENGE_OUTLINE_PX
         gw, gh = glyph.get_size()
         surf = pygame.Surface((gw + 2 * ring, gh + 2 * ring), pygame.SRCALPHA)
-        for dx in (-ring, 0, ring):
-            for dy in (-ring, 0, ring):
-                if dx or dy:
-                    surf.blit(glyph, (ring + dx, ring + dy))
+        for dx, dy in _dilation_offsets(ring):
+            surf.blit(glyph, (ring + dx, ring + dy))
         # Hollow the dilated glyph by painting its interior in BACKGROUND, which
         # is exact because this overlay is drawn straight onto the background
         # fill with nothing beneath it. Subtracting the glyph instead would take
