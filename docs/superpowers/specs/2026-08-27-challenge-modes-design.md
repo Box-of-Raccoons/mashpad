@@ -516,11 +516,19 @@ sampling is exact and never gives up.
 
 Two things to look at on the Pi, beyond the slice-4 gate that is still open:
 
-* At the 1280x720 windowed default, a wide equation leaves so little spawnable
-  screen that item glyphs lean into it from the edges. At 1920x1080, the Pi's
-  actual mode, the overlay is clear. The keep-out excludes glyph centres, never
-  glyph edges, because a box with full item clearance would cover every
-  spawnable pixel of a 720p screen.
+* The keep-out grows by half a scaled glyph, so a glyph's EDGE clears the
+  overlay rather than only its centre. Without that a letter centred exactly
+  on the box edge landed 68px inside the row it was meant to stay off, which
+  is what a real 1280x720 session showed. The clearance shrinks by steps when
+  the full half-width would leave no valid spawn band at all, which happens
+  for a seven-letter word on a 720p screen and nowhere else.
+* Spawnable area decides how the smash glyphs distribute. At 1280x720 the
+  usable band for spawn centres is 1000x440 and the overlay plus its
+  clearance takes most of it, so glyphs bunch into two columns at the left
+  and right edges. At 1920x1080, the Pi's actual mode, it is 1640x800 and
+  they scatter all round the word. If those columns ever need loosening,
+  CHALLENGE_ITEM_SCALE is the knob: a smaller glyph needs less clearance,
+  which widens the bands.
 * The counting hints pop one block per `CHALLENGE_COUNT_CADENCE_S`, chosen to
   roughly match a digit clip plus `UTTERANCE_GAP_S`. They are not synchronised
   to the audio: `speak` does not report clip lengths. If the blocks visibly lag
