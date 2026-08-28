@@ -173,10 +173,119 @@ Ctrl+Alt+O again) to close the menu.
 | **Raccoons** | How often a non-letter key spawns image art instead of a shape (when images are installed): **Less** (~25%), **Normal** (~50%), **Lots** (~75%). |
 | **Phrases** | **On/Off** — whether the app occasionally speaks a short reactive comment (see [Reactive phrases](#reactive-phrases)). |
 | **Sounds** | **Piano/Dings** — what plays on each keypress or click alongside the spoken name. **Piano** (default) steps through children's-song melodies (London Bridge, Twinkle Twinkle, Mary Had a Little Lamb, and more) — any key plays the next note, and finished songs roll into the next. **Dings** plays the classic random pops/boings/dings. Switching to Piano plays a sample note. |
+| **Display** | **Smash/BabyIDE**. **Smash** (default) is the classic big-glyph key smasher. **BabyIDE** prints mashpad's own source code, one syntax-coloured token per key press, as though the baby were writing it. |
+| **Challenge** | **Off / Find a letter / Find a number / Spelling / Math**. Layers an ask over the smashing without taking any of it away (see [Challenge modes](#challenge-modes)). |
+| **Answers** | **Guided/Advanced**. Only shown for Spelling and Math. Guided ghosts the letters still to come and shows a sum's total as a pile of blocks; Advanced hides both and leaves the picture and the announcer to carry it. |
+| **Numbers** | **2 to 9 / 0 to 20**. Only shown for Math. The 0 to 20 tier asks for two-digit answers, so it needs two key presses. |
+| **Sums** | **Adding / Taking away / Both** (default Both). Only shown for Math. |
 
 Every change is saved immediately (and again on close) to `settings.json` in the
 repo root. That file is device-local and git-ignored — deleting it restores the
 defaults (Random voice, volume 80, uppercase, Normal raccoons).
+
+## Challenge modes
+
+Normally mashpad has no goal: every key does something bright, and that is the
+whole game. A **challenge** layers an ask on top without taking any of it away.
+The announcer asks for something, the screen shows what is wanted, and the child
+hunts for it on the keyboard. Every press still spawns its glyph, plays its
+sound and speaks its name exactly as before. What is added is a target, a much
+bigger celebration when it is found, and a hint ladder that makes sure the round
+always ends in a win.
+
+There is no failure state anywhere in this. Wrong presses are never punished,
+nothing times out, and no round can be lost or abandoned. Pick one with
+**Challenge** in the options menu:
+
+- **Find a letter** puts a large dim outline letter in the middle of the screen
+  and asks for it by name. Pressing it floods the outline with colour and fires
+  confetti. The target is always uppercase, whatever **Letters** is set to,
+  because that is what is printed on the keycaps.
+- **Find a number** is the same machinery over the digits 0 to 9.
+- **Spelling** shows a word's picture above a row of answer slots and asks the
+  child to spell it. Letters must be pressed left to right: a letter that
+  appears later in the word does not count early. The completed letters sit in
+  full colour and the slot being waited on glows, so exactly one thing in the
+  row is ever bright.
+- **Math** shows a sum as blocks and asks what it makes: two piles with a
+  `+` between them, or one pile with part of it being taken away. See
+  [Counting blocks](#counting-blocks) below.
+
+A challenge does nothing in BabyIDE display mode, which has no glyph field to
+put a target on.
+
+### The hint ladder
+
+Every mode shares one ladder, and its last rung is what guarantees a win:
+
+| Step | Reached after | What happens |
+|------|---------------|--------------|
+| 0 | straight away | The ask is spoken and the target draws in, dim. |
+| 1 | 4 deliberate presses **and** 10 seconds | The ask again; the target pulses. |
+| 2 | 8 deliberate presses **and** 25 seconds | A real hint: the sticker for that letter, the letter a spelling row is waiting on, or a pile counted out loud. |
+| 3 | 45 seconds | It is given away. Any key now wins. |
+
+A press only counts as *deliberate* if it lands at least 0.7 seconds after the
+last one that counted, so a burst counts once. Both floors must be met, not
+either, which is why a happily mashing toddler cannot rush to step 3: at six
+presses a second an "N presses or M seconds" ladder would reach the giveaway in
+about four seconds every round, and the mode would teach that mashing wins.
+Step 3 is time-only on purpose, because a child who has stopped pressing
+altogether is exactly the one who needs rescuing.
+
+Getting a letter right in a spelling or two-digit answer resets the ladder, so
+every slot starts fresh. The round clock stops while the options menu or the
+splash is up, and a round parks itself after two minutes of silence rather than
+nagging an empty room; the next press re-announces it from the top.
+
+### Spelling words
+
+The pool is limited to words every voice pack can already say and that are short
+enough for this age: **BOOK, STAR, DRUM, RING, HUG, LOVE**. Advanced adds
+**WATER, HEART, CIRCLE, SQUARE, BALLOON, BUBBLES**. Each word is shown by its
+own picture, either a sticker from `assets/images/` or, for the words that name
+one, a drawn shape.
+
+Guided shows the letters still to come as dim ghosts. Advanced shows only what
+has been won, so the picture and the announcer are the only clues.
+
+### Counting blocks
+
+The math mode is two tiers that differ in how the answer is entered, not just in
+difficulty. **2 to 9** answers in a single key press. **0 to 20** needs two, so
+the answer becomes a slot row like the spelling one; a single-digit answer there
+shows one slot, never a leading zero.
+
+Each pile takes its own colour and **the numeral under a pile is drawn in that
+pile's colour**. That pairing is the teaching mechanic: a child who cannot yet
+read "3" as a symbol can still see that the blue numeral belongs to the blue
+pile. Taking away shows one pile whose last blocks drain to grey and shrink out
+of it, rather than a second colour arriving, so it never reads as two piles
+waiting to be added.
+
+Guided shows the total as a pile of blocks sitting in the answer slot, keeping
+each block's own colour, so the quantity is visible but the numeral is still the
+thing being asked for. Advanced leaves the slot empty.
+
+The hints do the counting, because counting one-to-one is the actual skill at
+this age: the first pile a block at a time, then the second, then the whole line,
+then what it makes.
+
+### Which voice speaks an ask
+
+The carrier clips an ask needs ("find the letter", "can you spell", "what is",
+"plus", "minus", "makes", and the words ten through twenty) are not in the six
+shipped voice packs yet. They live in a locally generated
+`sounds/voice/_placeholder/` pack, so asks and hints are spoken in that robot
+voice while the smash echoes stay in whichever voice is selected. Packs whose
+name starts with an underscore are never chosen by **Random** or **Cycle**; they
+are reachable only by picking them in the menu, which keeps robot clips out of
+ordinary play. Once the carriers are recorded into the real packs, the selected
+voice will speak everything and this rule retires itself.
+
+If no pack can say a whole line, or the app was started with `--mute`, the round
+simply runs without speech. The target, the slot row and the blocks carry it,
+and the ladder still escalates on its visual steps.
 
 ## Splash screen
 
