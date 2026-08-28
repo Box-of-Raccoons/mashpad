@@ -81,6 +81,7 @@ def make(packs):
     a._pending_phrase = None
     a._utterance = []
     a._utterance_active = False
+    a._phrase_until = 0.0
     a._phrase_channel = FakeChannel()
     a._cache = {}
     a._voice = {}
@@ -325,6 +326,81 @@ if got is not None:
 b = make({})                                    # no packs loaded at all
 if b.challenge_voice(NEED) is not None:
     fail("expected None with no packs")
+sys.exit(0)
+""")
+    assert proc.returncode == 0, f"{proc.stdout}\n{proc.stderr}"
+
+
+# ---------------------------------------------------------------------------
+# A challenge ask must not cut off a reactive phrase
+#
+# Found by Hardy on the Pi: "You're doing amaz-FIND THE LETTER". main.py already
+# stops a phrase STARTING while an utterance speaks, but nothing guarded the
+# reverse — speak() cancels first, and cancel_speech stopped PHRASE_CHANNEL
+# unconditionally, so the ask killed a phrase that was already sounding. Both
+# share the one reserved channel.
+# ---------------------------------------------------------------------------
+
+_PHRASE_PRE = r"""
+pygame.time.get_ticks = lambda: 0
+
+
+def with_phrase(a, length=2.0):
+    # Seed a reactive-phrase pack and start one sounding at t=LEAD.
+    a._phrases = {"v": {"fun": ["v/fun"]}}
+    a._cache["v/fun"] = FakeSound("fun", length)
+    a.play_phrase("fun", FakeRng(), "v")
+    a.update(LEAD)
+    if not a._phrase_channel.played or a._phrase_channel.played[-1].tag != "fun":
+        fail("setup: phrase never started")
+    return LEAD + length          # when the phrase finishes
+"""
+
+
+def test_ask_does_not_stop_a_sounding_phrase():
+    proc = _run(_PRE + _PHRASE_PRE + r"""
+a = make(ask_pack())
+with_phrase(a)
+stops_before = a._phrase_channel.stops
+a.speak(("find-the-letter", "b"), "v", FakeRng(), now=LEAD + 0.2)
+if a._phrase_channel.stops != stops_before:
+    fail("the ask stopped a phrase that was still speaking")
+sys.exit(0)
+""")
+    assert proc.returncode == 0, f"{proc.stdout}\n{proc.stderr}"
+
+
+def test_ask_waits_until_the_phrase_has_finished():
+    proc = _run(_PRE + _PHRASE_PRE + r"""
+a = make(ask_pack())
+phrase_end = with_phrase(a)
+a.speak(("find-the-letter", "b"), "v", FakeRng(), now=LEAD + 0.2)
+if not a._utterance:
+    fail("nothing scheduled")
+first = a._utterance[0][1]
+if first < phrase_end:
+    fail("utterance starts at %.3f, before the phrase ends at %.3f"
+         % (first, phrase_end))
+sys.exit(0)
+""")
+    assert proc.returncode == 0, f"{proc.stdout}\n{proc.stderr}"
+
+
+def test_cancel_still_stops_our_own_utterance():
+    """The deferral must not make cancel_speech a no-op for a real utterance."""
+    proc = _run(_PRE + r"""
+a = make(ask_pack())
+a.speak(("find-the-letter", "b"), "v", FakeRng(), now=100.0)
+a.update(100.0 + LEAD)
+if not a._phrase_channel.get_busy():
+    fail("setup: utterance never started")
+before = a._phrase_channel.stops
+a.cancel_speech(101.0)
+if a._phrase_channel.stops != before + 1:
+    fail("cancel did not stop our own utterance (stops=%d, was %d)"
+         % (a._phrase_channel.stops, before))
+if a._utterance:
+    fail("queue not cleared")
 sys.exit(0)
 """)
     assert proc.returncode == 0, f"{proc.stdout}\n{proc.stderr}"
