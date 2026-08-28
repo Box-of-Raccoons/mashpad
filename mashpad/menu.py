@@ -20,16 +20,16 @@ MENU_FONT_PX = 48
 # About-footer font size (px) — small, quiet credit line at the panel bottom.
 ABOUT_FONT_PX = 24
 
-# Row indices (order the rows are drawn / navigated).
-_ROW_VOICE = 0
-_ROW_VOLUME = 1
-_ROW_LETTERS = 2
-_ROW_RACCOONS = 3
-_ROW_PHRASES = 4
-_ROW_SOUNDS = 5
-_ROW_DISPLAY = 6
-_ROW_QUIT = 7
-_ROW_COUNT = 8
+# Smallest font the panel may shrink to before it gives up and overflows.
+MENU_MIN_FONT_PX = 20
+
+# Vertical breathing room left around the panel when fitting it to the screen.
+MENU_MARGIN_PX = 40
+
+# Challenge values the menu is allowed to offer. This list is the per-slice
+# gate: "spell" and "math" are deliberately absent until their slices land, so
+# a grown-up can never select an ask that has no implementation behind it.
+IMPLEMENTED_CHALLENGES = ("none", "letter", "number")
 
 # Note auditioned when the Sounds row is switched to Piano (mirrors the voice-row
 # "hello" audition). A mid-range generated note so grown-ups hear the timbre.
@@ -49,8 +49,12 @@ class Menu:
     def __init__(self, settings, audio, font_path, save_path) -> None:
         self._settings = settings
         self._audio = audio
-        self._font = pygame.font.Font(str(font_path), MENU_FONT_PX)
-        self._small_font = pygame.font.Font(str(font_path), ABOUT_FONT_PX)
+        self._font_path = str(font_path)
+        # Fonts are sized to the screen at draw time (see _metrics), so they are
+        # cached by point size rather than built once here.
+        self._fonts: dict[int, "pygame.font.Font"] = {}
+        self._metrics_key = None
+        self._metrics = None
         self._rng = random.Random()  # for auditioning sample words
         # settings.json is writable state — caller provides path.
         self._save_path = save_path
@@ -95,37 +99,40 @@ class Menu:
             self.close()
             return None
 
+        count = len(self._row_specs())
         if key == pygame.K_UP:
-            self._selected = (self._selected - 1) % _ROW_COUNT
+            self._selected = (self._selected - 1) % count
         elif key == pygame.K_DOWN:
-            self._selected = (self._selected + 1) % _ROW_COUNT
+            self._selected = (self._selected + 1) % count
         elif key == pygame.K_LEFT:
             self._step(-1)
         elif key == pygame.K_RIGHT:
             self._step(+1)
         elif key in (pygame.K_RETURN, pygame.K_KP_ENTER):
-            if self._selected == _ROW_QUIT:
+            if self._selected_key() == "quit":
                 return "quit"
         return None
 
+    def _selected_key(self) -> str:
+        """Key of the highlighted row, clamped if the row list just shrank."""
+        specs = self._row_specs()
+        self._selected = max(0, min(self._selected, len(specs) - 1))
+        return specs[self._selected][0]
+
     def _step(self, direction: int) -> None:
-        """Apply a left/right change to the currently highlighted row."""
-        row = self._selected
-        if row == _ROW_VOICE:
-            self._step_voice(direction)
-        elif row == _ROW_VOLUME:
-            self._step_volume(direction)
-        elif row == _ROW_LETTERS:
-            self._step_letters()
-        elif row == _ROW_RACCOONS:
-            self._step_raccoons(direction)
-        elif row == _ROW_PHRASES:
-            self._step_phrases()
-        elif row == _ROW_SOUNDS:
-            self._step_sounds()
-        elif row == _ROW_DISPLAY:
-            self._step_display()
-        # Quit row: no left/right value.
+        """Apply a left/right change to the currently highlighted row.
+
+        Dispatch is by row key, so adding a row means adding it to _row_specs()
+        and writing its _step_<key> handler — nothing else has to stay in sync.
+        Rows with no handler (Quit) are a silent no-op.
+        """
+        handler = getattr(self, f"_step_{self._selected_key()}", None)
+        if handler is None:
+            return
+        handler(direction)
+        # Some rows appear and disappear (Answers, Numbers), so the highlight
+        # may now be past the end of a shorter list.
+        self._selected = max(0, min(self._selected, len(self._row_specs()) - 1))
 
     # --------------------------------------------------------------- row logic
 
@@ -156,7 +163,7 @@ class Menu:
             self._audio.set_master_volume(vol / 100.0)  # live feedback
             self._save()
 
-    def _step_letters(self) -> None:
+    def _step_letters(self, direction: int = 0) -> None:
         # Two-value toggle: left and right both flip it.
         self._settings.letter_case = (
             "lower" if self._settings.letter_case == "upper" else "upper"
@@ -172,12 +179,12 @@ class Menu:
         self._settings.raccoon_amount = settings_mod.RACCOON_AMOUNTS[idx]
         self._save()
 
-    def _step_phrases(self) -> None:
+    def _step_phrases(self, direction: int = 0) -> None:
         # Two-value toggle: left and right both flip it.
         self._settings.phrases = not self._settings.phrases
         self._save()
 
-    def _step_sounds(self) -> None:
+    def _step_sounds(self, direction: int = 0) -> None:
         # Two-value toggle: left and right both flip piano <-> dings.
         self._settings.sound_mode = (
             "dings" if self._settings.sound_mode == "piano" else "piano"
@@ -188,11 +195,34 @@ class Menu:
         if self._settings.sound_mode == "piano":
             self._audio.play_note(_AUDITION_NOTE)
 
-    def _step_display(self) -> None:
+    def _step_display(self, direction: int = 0) -> None:
         # Two-value toggle: left and right both flip smash <-> babyide.
         self._settings.display_mode = (
             "babyide" if self._settings.display_mode == "smash" else "smash"
         )
+        self._save()
+
+    def _cycle(self, current, options, direction):
+        """Next value in *options*, wrapping. Unknown current value → the first."""
+        try:
+            idx = options.index(current)
+        except ValueError:
+            return options[0]
+        return options[(idx + direction) % len(options)]
+
+    def _step_challenge(self, direction: int) -> None:
+        self._settings.challenge = self._cycle(
+            self._settings.challenge, IMPLEMENTED_CHALLENGES, direction or 1)
+        self._save()
+
+    def _step_answer_style(self, direction: int) -> None:
+        self._settings.answer_style = self._cycle(
+            self._settings.answer_style, settings_mod.ANSWER_STYLES, direction or 1)
+        self._save()
+
+    def _step_math_range(self, direction: int) -> None:
+        self._settings.math_range = self._cycle(
+            self._settings.math_range, settings_mod.MATH_RANGES, direction or 1)
         self._save()
 
     def _save(self) -> None:
@@ -209,18 +239,81 @@ class Menu:
         # Friendly label for a known pack; unknown packs fall back to name.title().
         return config.voice_label(v)
 
+    _CHALLENGE_LABELS = {
+        "none": "Off",
+        "letter": "Find a letter",
+        "number": "Find a number",
+        "spell": "Spelling",
+        "math": "Math",
+    }
+
+    def _row_specs(self):
+        """(key, label, value) for every visible row, in draw order.
+
+        The single source of truth: navigation counts these, the left/right
+        dispatch reads the key, and draw() renders the label and value. Answers
+        and Numbers only appear when the selected challenge actually uses them,
+        which also keeps the panel short enough to fit a 720p window.
+        """
+        s = self._settings
+        rows = [
+            ("voice", "Voice", self._voice_label()),
+            ("volume", "Volume", str(s.volume)),
+            ("letters", "Letters", "ABC" if s.letter_case == "upper" else "abc"),
+            ("raccoons", "Raccoons", s.raccoon_amount.title()),
+            ("phrases", "Phrases", "On" if s.phrases else "Off"),
+            ("sounds", "Sounds", "Piano" if s.sound_mode == "piano" else "Dings"),
+            ("display", "Display", "BabyIDE" if s.display_mode == "babyide" else "Smash"),
+            ("challenge", "Challenge", self._CHALLENGE_LABELS.get(s.challenge, "Off")),
+        ]
+        if s.challenge in ("spell", "math"):
+            rows.append(("answer_style", "Answers",
+                         "Guided" if s.answer_style == "guided" else "Advanced"))
+        if s.challenge == "math":
+            rows.append(("math_range", "Numbers",
+                         "2 to 9" if s.math_range == "2-9" else "0 to 20"))
+        rows.append(("quit", "Quit", ""))
+        return rows
+
     def _rows(self):
         """(label, value) pairs, in draw order."""
-        return [
-            ("Voice", self._voice_label()),
-            ("Volume", str(self._settings.volume)),
-            ("Letters", "ABC" if self._settings.letter_case == "upper" else "abc"),
-            ("Raccoons", self._settings.raccoon_amount.title()),
-            ("Phrases", "On" if self._settings.phrases else "Off"),
-            ("Sounds", "Piano" if self._settings.sound_mode == "piano" else "Dings"),
-            ("Display", "BabyIDE" if self._settings.display_mode == "babyide" else "Smash"),
-            ("Quit", ""),
-        ]
+        return [(label, value) for _key, label, value in self._row_specs()]
+
+    # ------------------------------------------------------------- panel size
+
+    def _font_at(self, px: int):
+        font = self._fonts.get(px)
+        if font is None:
+            font = self._fonts[px] = pygame.font.Font(self._font_path, px)
+        return font
+
+    def _measure(self, height: int, row_count: int):
+        """(font, small_font, line_h, footer_h, panel_h) fitted to *height*.
+
+        The panel used to be built from a fixed 48px font, which overflowed even
+        the 1280x720 windowed default at eight rows. Shrinking to fit keeps every
+        row reachable on any screen the app runs on, Pi or dev window.
+        """
+        key = (height, row_count)
+        if self._metrics_key == key:
+            return self._metrics
+        px = MENU_FONT_PX
+        while True:
+            font = self._font_at(px)
+            small = self._font_at(max(12, round(px * ABOUT_FONT_PX / MENU_FONT_PX)))
+            line_h = font.get_linesize() + round(18 * px / MENU_FONT_PX)
+            footer_h = small.get_linesize() * 2 + 24
+            panel_h = font.get_linesize() + 60 + line_h * row_count + 40 + footer_h
+            if panel_h <= height - MENU_MARGIN_PX or px <= MENU_MIN_FONT_PX:
+                break
+            px -= 2
+        self._metrics_key = key
+        self._metrics = (font, small, line_h, footer_h, panel_h)
+        return self._metrics
+
+    def panel_height(self, height: int) -> int:
+        """Height the panel would occupy on a screen *height* px tall."""
+        return self._measure(height, len(self._row_specs()))[4]
 
     def draw(self, screen) -> None:
         """Draw the dim overlay + panel on top of the running scene."""
@@ -234,15 +327,12 @@ class Menu:
         screen.blit(overlay, (0, 0))
 
         rows = self._rows()
-        title_surf = self._font.render("Options", True, (255, 255, 255))
-        line_h = self._font.get_linesize() + 18
-
-        # About footer occupies two small lines + padding at the panel bottom.
-        foot_line_h = self._small_font.get_linesize()
-        footer_h = foot_line_h * 2 + 24
+        # Fitted to the screen, so the panel never runs off the bottom.
+        font, small_font, line_h, footer_h, panel_h = self._measure(h, len(rows))
+        title_surf = font.render("Options", True, (255, 255, 255))
+        foot_line_h = small_font.get_linesize()
 
         panel_w = int(w * 0.6)
-        panel_h = title_surf.get_height() + 60 + line_h * len(rows) + 40 + footer_h
         panel_x = (w - panel_w) // 2
         panel_y = (h - panel_h) // 2
 
@@ -266,18 +356,18 @@ class Menu:
             highlighted = i == self._selected
             # Highlighted row → a bright palette colour; others → soft grey.
             color = config.PALETTE[i % len(config.PALETTE)] if highlighted else (200, 200, 200)
-            label_surf = self._font.render(label, True, color)
+            label_surf = font.render(label, True, color)
             screen.blit(label_surf, (left_x, y))
             if value:
-                value_surf = self._font.render(value, True, color)
+                value_surf = font.render(value, True, color)
                 screen.blit(value_surf, value_surf.get_rect(topright=(right_x, y)))
             y += line_h
 
         # About footer: two quiet centred lines at the bottom of the panel.
         foot_grey = (140, 140, 150)
         foot_top = panel_y + panel_h - 16 - foot_line_h * 2
-        line1 = self._small_font.render(f"mashpad v{mashpad.__version__}", True, foot_grey)
-        line2 = self._small_font.render(
+        line1 = small_font.render(f"mashpad v{mashpad.__version__}", True, foot_grey)
+        line2 = small_font.render(
             f"{config.COMPANY}, {config.BUILD_YEAR}", True, foot_grey
         )
         screen.blit(line1, line1.get_rect(center=(w // 2, foot_top + foot_line_h // 2)))

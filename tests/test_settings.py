@@ -19,6 +19,9 @@ def test_defaults():
     assert s.phrases is True
     assert s.sound_mode == "piano"
     assert s.display_mode == "smash"
+    assert s.challenge == "none"
+    assert s.answer_style == "guided"
+    assert s.math_range == "2-9"
 
 
 # ---------------------------------------------------------------------------
@@ -59,7 +62,7 @@ def test_save_writes_all_keys(tmp_path):
     data = json.loads(p.read_text(encoding="utf-8"))
     assert set(data) == {
         "voice_mode", "volume", "letter_case", "raccoon_amount", "phrases",
-        "sound_mode", "display_mode",
+        "sound_mode", "display_mode", "challenge", "answer_style", "math_range",
     }
 
 
@@ -190,6 +193,64 @@ def test_display_mode_missing_defaults_to_smash(tmp_path):
     p = tmp_path / "settings.json"
     p.write_text(json.dumps({"volume": 50}), encoding="utf-8")
     assert load(p).display_mode == "smash"
+
+
+# ---------------------------------------------------------------------------
+# challenge / answer_style / math_range
+# ---------------------------------------------------------------------------
+
+def test_challenge_accepted(tmp_path):
+    p = tmp_path / "settings.json"
+    p.write_text(json.dumps({"challenge": "letter"}), encoding="utf-8")
+    assert load(p).challenge == "letter"
+
+
+def test_challenge_invalid_defaults_to_none(tmp_path):
+    p = tmp_path / "settings.json"
+    p.write_text(json.dumps({"challenge": "spelling-bee"}), encoding="utf-8")
+    assert load(p).challenge == "none"
+
+
+def test_answer_style_accepted(tmp_path):
+    p = tmp_path / "settings.json"
+    p.write_text(json.dumps({"answer_style": "advanced"}), encoding="utf-8")
+    assert load(p).answer_style == "advanced"
+
+
+def test_answer_style_invalid_defaults_to_guided(tmp_path):
+    p = tmp_path / "settings.json"
+    p.write_text(json.dumps({"answer_style": "hard"}), encoding="utf-8")
+    assert load(p).answer_style == "guided"
+
+
+def test_math_range_accepted(tmp_path):
+    p = tmp_path / "settings.json"
+    p.write_text(json.dumps({"math_range": "0-20"}), encoding="utf-8")
+    assert load(p).math_range == "0-20"
+
+
+def test_math_range_invalid_defaults_to_small(tmp_path):
+    p = tmp_path / "settings.json"
+    p.write_text(json.dumps({"math_range": "0-1000"}), encoding="utf-8")
+    assert load(p).math_range == "2-9"
+
+
+def test_bad_challenge_keeps_valid_siblings(tmp_path):
+    """Field-wise validation: one bad value must not discard the good ones."""
+    p = tmp_path / "settings.json"
+    p.write_text(json.dumps({"challenge": "nope", "answer_style": "advanced",
+                             "volume": 30}), encoding="utf-8")
+    s = load(p)
+    assert s.challenge == "none"
+    assert s.answer_style == "advanced"
+    assert s.volume == 30
+
+
+def test_new_fields_round_trip(tmp_path):
+    p = tmp_path / "settings.json"
+    original = Settings(challenge="math", answer_style="advanced", math_range="0-20")
+    assert save(original, p) is True
+    assert load(p) == original
 
 
 # ---------------------------------------------------------------------------
