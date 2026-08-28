@@ -53,6 +53,10 @@ class View:
     # otherwise slide from one O to an identical O and read as nothing
     # happening. None until the first fill of the round.
     filled_at: float | None = None
+    # Wall time the current ladder step began. The counting hints pop one block
+    # per beat from here, so the blocks tick along with the voice instead of
+    # appearing all at once under a number being counted aloud.
+    step_at: float | None = None
 
 
 def _art_index(art_names):
@@ -87,6 +91,7 @@ class ChallengeDirector:
         # Ladder state. _elapsed is round time, not wall time: it stops while
         # paused (grown-up menu, splash) and while parked (nobody is playing).
         self._step = 0
+        self._step_at: float | None = None
         self._counted = 0
         self._last_counted_at: float | None = None
         self._elapsed = 0.0
@@ -182,6 +187,7 @@ class ChallengeDirector:
 
     def _reset_ladder(self, now: float) -> None:
         self._step = 0
+        self._step_at = now
         self._counted = 0
         self._last_counted_at = None
         self._elapsed = 0.0
@@ -282,6 +288,7 @@ class ChallengeDirector:
             presses, seconds = config.CHALLENGE_LADDER[level - 1]
             if self._elapsed >= seconds and (presses is None or self._counted >= presses):
                 self._step = level
+                self._step_at = now
                 return ("hint", level)
         return None
 
@@ -299,4 +306,5 @@ class ChallengeDirector:
             gimme=self._step >= len(config.CHALLENGE_LADDER),
             art=self._round.art,
             filled_at=self._filled_at,
+            step_at=self._step_at,
         )

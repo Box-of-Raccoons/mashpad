@@ -363,3 +363,244 @@ def bar(c):
 assert peak(bar(cells[1])) > peak(bar(cells[2])), (peak(bar(cells[1])),
                                                    peak(bar(cells[2])))
 """)
+
+
+# ---------------------------------------------------------------------------
+# Counting blocks
+# ---------------------------------------------------------------------------
+
+_BLOCKS = r"""
+from mashpad import counting
+from mashpad.challenge import View
+
+SLOT_FONT = pygame.font.Font(str(paths.app_root() / "assets" / "DejaVuSans-Bold.ttf"),
+                             config.CHALLENGE_SLOT_PX)
+
+
+def sum_view(target="3+2", progress=0, step=0, step_at=None, gimme=False):
+    return View(kind="math", target=target, answer=counting.answer(target),
+                progress=progress, step=step, gimme=gimme, art=None,
+                filled_at=None, step_at=step_at)
+
+
+def draw(v, now=0.0, guided=True):
+    screen.fill(render.BACKGROUND)
+    render.draw_challenge_blocks(screen, v, SLOT_FONT, now, guided=guided)
+    return render.challenge_blocks_layout(screen.get_width(), screen.get_height(),
+                                          v.target, len(v.answer), guided)
+
+
+def colors_in(rect):
+    return {tuple(screen.get_at((x, y))[:3])
+            for x in range(max(0, rect.left), min(screen.get_width(), rect.right), 2)
+            for y in range(max(0, rect.top), min(screen.get_height(), rect.bottom), 2)}
+
+
+def numeral_box(layout, group="a"):
+    r = layout["rect_" + group]
+    top = r.bottom + render.CHALLENGE_NUM_GAP_PX
+    return pygame.Rect(r.left - 40, top, r.width + 80, config.CHALLENGE_SLOT_PX)
+
+
+DARK = render.BACKGROUND
+"""
+
+
+def test_the_two_groups_take_colours_far_apart_in_hue():
+    _ok(_BLOCKS + r"""
+# No blue beside azure: a pairing the child cannot tell apart teaches nothing.
+for target, _answer in counting.pool("0-20"):
+    a, b = render.challenge_block_colors(target)
+    i, j = config.PALETTE.index(a), config.PALETTE.index(b)
+    apart = min((i - j) % len(config.PALETTE), (j - i) % len(config.PALETTE))
+    assert apart >= render.CHALLENGE_HUE_SEPARATION, (target, i, j, apart)
+""")
+
+
+def test_block_colours_do_not_change_between_runs():
+    _ok(_BLOCKS + r"""
+# The overlay is rebuilt from view() every frame, so the colour has to be a
+# function of the target and nothing else. hash() is salted per process.
+assert render.challenge_block_colors("7+4") == render.challenge_block_colors("7+4")
+""")
+
+
+def test_an_addition_draws_one_block_per_thing_being_counted():
+    _ok(_BLOCKS + r"""
+layout = draw(sum_view("4+3"))
+assert len(layout["blocks_a"]) == 4, len(layout["blocks_a"])
+assert len(layout["blocks_b"]) == 3, len(layout["blocks_b"])
+w, h = screen.get_size()
+for rect in layout["blocks_a"] + layout["blocks_b"]:
+    assert 0 <= rect.left and rect.right <= w, rect
+""")
+
+
+def test_each_numeral_is_drawn_in_its_own_group_colour():
+    _ok(_BLOCKS + r"""
+# The colour pairing IS the teaching mechanic: a child who cannot read "3" can
+# still see that the blue numeral belongs to the blue pile.
+v = sum_view("4+3")
+layout = draw(v)
+color_a, color_b = render.challenge_block_colors(v.target)
+assert color_a in colors_in(numeral_box(layout, "a")), color_a
+assert color_b in colors_in(numeral_box(layout, "b")), color_b
+""")
+
+
+def test_a_subtraction_has_one_group_and_one_colour():
+    _ok(_BLOCKS + r"""
+# The blocks leave rather than a second colour arriving, so the group never
+# reads as two piles waiting to be added.
+v = sum_view("5-2")
+layout = draw(v)
+assert len(layout["blocks_a"]) == 5
+assert layout["blocks_b"] == []
+_color_a, color_b = render.challenge_block_colors(v.target)
+assert color_b not in colors_in(pygame.Rect(0, 0, *screen.get_size()))
+# The two that left drained to grey.
+assert config.CHALLENGE_BLOCK_GONE_COLOR in colors_in(
+    pygame.Rect(layout["rect_a"].left, layout["rect_a"].top - 20,
+                layout["rect_a"].width + 60, layout["rect_a"].height + 60))
+""")
+
+
+def test_the_guided_pile_shows_the_total_and_advanced_does_not():
+    _ok(_BLOCKS + r"""
+# Hardy's call: show the count with the blocks, never ghost the numeral.
+layout = draw(sum_view("4+3"), guided=True)
+assert len(layout["result"]) == 7, len(layout["result"])
+cell = layout["cells"][0]
+assert colors_in(cell) != {DARK}
+layout = draw(sum_view("4+3"), guided=False)
+assert layout["result"] == []
+assert colors_in(layout["cells"][0]) == {DARK}
+""")
+
+
+def test_the_pile_clears_once_a_digit_lands():
+    _ok(_BLOCKS + r"""
+# The numeral takes that space, so the two must never be drawn on top of
+# each other.
+layout = draw(sum_view("12+5", progress=1))
+assert colors_in(layout["cells"][1]) == {DARK}
+""")
+
+
+def test_the_answer_is_never_shown_before_the_gimme():
+    _ok(_BLOCKS + r"""
+# Guided shows the quantity, not the numeral; the numeral is the ask. The
+# answer glyph is the only near-white thing that can appear in a cell — no
+# PALETTE colour has all three channels high.
+def numeral_pixels(cell):
+    return sum(1 for c in colors_in(cell) if min(c) > 200)
+
+for guided in (True, False):
+    layout = draw(sum_view("5-2"), guided=guided)
+    assert numeral_pixels(layout["cells"][0]) == 0, guided
+# The last rung hands it over: that is what the gimme is for.
+layout = draw(sum_view("5-2", step=3, gimme=True, step_at=0.0))
+assert numeral_pixels(layout["cells"][0]) > 0
+""")
+
+
+def test_a_counting_hint_lights_one_block_at_a_time():
+    _ok(_BLOCKS + r"""
+v = sum_view("4+3", step=1, step_at=10.0)
+cad = config.CHALLENGE_COUNT_CADENCE_S
+assert render.challenge_count_lit(v, 10.0) == (1, 0)
+assert render.challenge_count_lit(v, 10.0 + 1.5 * cad) == (2, 0)
+assert render.challenge_count_lit(v, 10.0 + 9 * cad) == (4, 0)   # never past the group
+v2 = sum_view("4+3", step=2, step_at=10.0)
+assert render.challenge_count_lit(v2, 10.0) == (4, 1)            # first pile stays lit
+v3 = sum_view("4+3", step=3, step_at=10.0)
+assert render.challenge_count_lit(v3, 10.0 + 5 * cad) == (4, 2)  # counts the whole line
+""")
+
+
+def test_outside_a_hint_every_block_is_lit():
+    _ok(_BLOCKS + r"""
+# The blocks are the sum, not a quiz — they only dim while a hint is counting.
+assert render.challenge_count_lit(sum_view("4+3"), 99.0) == (4, 3)
+assert render.challenge_count_lit(sum_view("5-2"), 99.0) == (5, 0)
+""")
+
+
+def test_a_subtraction_hint_counts_the_survivors_after_the_first_rung():
+    _ok(_BLOCKS + r"""
+cad = config.CHALLENGE_COUNT_CADENCE_S
+whole = sum_view("5-2", step=1, step_at=0.0)
+assert render.challenge_count_lit(whole, 9 * cad) == (5, 0)
+left = sum_view("5-2", step=2, step_at=0.0)
+assert render.challenge_count_lit(left, 9 * cad) == (3, 0)
+""")
+
+
+def test_a_counting_round_keeps_smash_glyphs_off_the_equation():
+    _ok(_BLOCKS + r"""
+from mashpad.challenge import Round
+w, h = screen.get_size()
+round_ = Round(kind="math", target="15+5", answer=("2", "0"), art=None)
+box = render.challenge_round_keepout(w, h, round_)
+layout = render.challenge_blocks_layout(w, h, round_.target, 2, True)
+bx, by, bw, bh = box
+rect = pygame.Rect(int(bx), int(by), int(bw), int(bh))
+for r in layout["blocks_a"] + layout["blocks_b"] + layout["cells"]:
+    assert rect.contains(r), (rect, r)
+rng = random.Random(4)
+half = config.ITEM_SIZE_PX / 2.0
+for _ in range(500):
+    x, y = render.spawn_position(rng, w, h, half, box)
+    assert not (bx <= x <= bx + bw and by <= y <= by + bh), (x, y)
+""")
+
+
+def test_the_widest_equation_still_fits_the_windowed_default():
+    _ok(_BLOCKS + r"""
+# 1280x720 is the --windowed default and the narrowest screen the app runs on.
+for target, answer in counting.pool("0-20"):
+    layout = render.challenge_blocks_layout(1280, 720, target, len(answer), True)
+    for r in (layout["blocks_a"] + layout["blocks_b"] + layout["result"]
+              + layout["cells"]):
+        assert 0 <= r.left and r.right <= 1280, (target, r)
+        assert 0 <= r.top and r.bottom <= 720, (target, r)
+""")
+
+
+def test_the_keepout_covers_the_numerals_under_a_wide_subtraction():
+    _ok(_BLOCKS + r"""
+# "16 - 15" is three glyphs under a group five blocks across, so it reaches
+# wider than any rect the layout returns.
+from mashpad.challenge import Round
+w, h = screen.get_size()
+round_ = Round(kind="math", target="16-15", answer=("1",), art=None)
+bx, by, bw, bh = render.challenge_round_keepout(w, h, round_)
+box = pygame.Rect(int(bx), int(by), int(bw), int(bh))
+v = sum_view("16-15")
+layout = draw(v)
+lit = pygame.Rect(0, 0, 0, 0)
+for x in range(0, w, 2):
+    for y in range(0, h, 2):
+        if tuple(screen.get_at((x, y))[:3]) != render.BACKGROUND:
+            lit = pygame.Rect(x, y, 1, 1) if lit.width == 0 else lit.union(
+                pygame.Rect(x, y, 1, 1))
+assert box.contains(lit), (box, lit)
+""")
+
+
+def test_every_sum_in_every_tier_draws_without_raising():
+    _ok(_BLOCKS + r"""
+# Cheap net for the edges the layout has to survive: a total of zero draws no
+# answer pile at all, and a group of one draws a single-column grid.
+for tier in ("2-9", "0-20"):
+    for target, answer in counting.pool(tier):
+        for guided in (True, False):
+            for step in (0, 1, 2, 3):
+                v = sum_view(target, step=step, step_at=0.0, gimme=step >= 3)
+                screen.fill(render.BACKGROUND)
+                render.draw_challenge_blocks(screen, v, SLOT_FONT, 1.0,
+                                             guided=guided)
+assert counting.answer("5-5") == ("0",)
+layout = draw(sum_view("5-5"))
+assert layout["result"] == []          # nothing left to show
+""")

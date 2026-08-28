@@ -26,10 +26,9 @@ MENU_MIN_FONT_PX = 20
 # Vertical breathing room left around the panel when fitting it to the screen.
 MENU_MARGIN_PX = 40
 
-# Challenge values the menu is allowed to offer. This list is the per-slice
-# gate: "spell" and "math" are deliberately absent until their slices land, so
-# a grown-up can never select an ask that has no implementation behind it.
-IMPLEMENTED_CHALLENGES = ("none", "letter", "number", "spell")
+# Challenge values the menu is allowed to offer. This list was the per-slice
+# gate while the epic was landing; all five have now shipped.
+IMPLEMENTED_CHALLENGES = ("none", "letter", "number", "spell", "math")
 
 # Note auditioned when the Sounds row is switched to Piano (mirrors the voice-row
 # "hello" audition). A mid-range generated note so grown-ups hear the timbre.
