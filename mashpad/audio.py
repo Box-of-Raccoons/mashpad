@@ -43,6 +43,10 @@ class Audio:
         self._duck = DuckWindow()  # non-phrase audio ducks while a phrase speaks
         # A phrase waiting for its scheduled start time: (Sound, start_seconds).
         self._pending_phrase: "tuple[pygame.mixer.Sound, float] | None" = None
+        # Utterance queue: [(Sound, start_seconds), ...] in ascending start order.
+        self._utterance: "list[tuple[pygame.mixer.Sound, float]]" = []
+        # Latch: an utterance clip has been launched and may still be sounding.
+        self._utterance_active: bool = False
 
         if muted:
             print("[mashpad audio] muted (--mute); running silent")
@@ -159,6 +163,101 @@ class Audio:
         start = self._duck.open(now, clip.get_length())
         self._pending_phrase = (clip, start)
 
+    @property
+    def speaking(self) -> bool:
+        """True while an utterance is queued or one of its clips is sounding.
+
+        The caller suppresses reactive phrases on this so "You're doing amazing!"
+        never talks over "Find the letter B". Reactive phrases (play_phrase) do
+        NOT set it — only speak().
+        """
+        if not self._ok:
+            return False
+        if self._utterance:
+            return True
+        if self._utterance_active and self._phrase_channel.get_busy():
+            return True
+        self._utterance_active = False
+        return False
+
+    def speak(self, stems, voice, rng, now: float | None = None) -> bool:
+        """Queue a multi-word utterance (e.g. ("find-the-letter", "b")) in *voice*.
+
+        Each stem is looked up as a spoken word in *voice*'s pack exactly as
+        play_for does, and the clips are scheduled UTTERANCE_GAP_S apart under a
+        single duck window covering the whole thing, so the bed does not bob back
+        up between words. update() launches each clip when it comes due.
+
+        All-or-nothing: if any stem is missing from the pack, nothing is
+        scheduled and False is returned — a half-spoken ask ("...B") is worse
+        than running the round silently. Returns True when the whole utterance
+        was scheduled. An in-flight utterance is cancelled first.
+        """
+        if not self._ok:
+            return False
+        pack = self._voice.get(voice) if voice is not None else None
+        if pack is None:
+            return False
+        # Resolve every clip BEFORE cancelling anything, so a stem the pack does
+        # not have leaves whatever is already speaking untouched.
+        clips = []
+        for stem in stems:
+            takes = pack.get(stem)
+            if not takes:
+                return False
+            clip = self._sound(rng.choice(takes))
+            if clip is None:
+                return False
+            clips.append(clip)
+        if not clips:
+            return False
+        if now is None:
+            now = pygame.time.get_ticks() / 1000.0
+        self.cancel_speech(now)
+        gap = config.UTTERANCE_GAP_S
+        total = sum(c.get_length() for c in clips) + gap * (len(clips) - 1)
+        start = self._duck.open(now, total)
+        offset = 0.0
+        for clip in clips:
+            clip.set_volume(self._master)
+            self._utterance.append((clip, start + offset))
+            offset += clip.get_length() + gap
+        return True
+
+    def cancel_speech(self, now: float) -> None:
+        """Stop the current utterance and let the bed come back up from *now*.
+
+        Without the duck release the bed would stay at PHRASE_DUCK_FACTOR until
+        the dead utterance's scheduled end — a long silence after a round change.
+        """
+        if not self._ok:
+            return
+        self._utterance.clear()
+        self._utterance_active = False
+        self._phrase_channel.stop()
+        self._duck.release(now)
+
+    def challenge_voice(self, required_stems, preferred=None):
+        """Name the pack that can speak *required_stems*, or None if none can.
+
+        Prefers *preferred* (the voice already selected) when that pack has every
+        stem, else the first qualifying pack in sorted order. The carrier clips
+        ("find-the-letter" and friends) are not in the shipped packs yet, so today
+        only the generated placeholder qualifies; once they are recorded into all
+        six packs the preferred voice always wins and this rule retires itself.
+        A None return means the caller runs the round with no speech.
+        """
+        if not self._ok:
+            return None
+        stems = list(required_stems)
+        names = [preferred] if preferred in self._voice else []
+        names += [n for n in sorted(self._voice) if n != preferred]
+        for name in names:
+            pack = self._voice[name]
+            if all(pack.get(stem) for stem in stems):
+                return name
+        return None
+
     def update(self, now: float) -> None:
         """Per-frame: start a due phrase and apply the duck envelope to the bed.
 
@@ -172,6 +271,13 @@ class Audio:
         if self._pending_phrase is not None and now >= self._pending_phrase[1]:
             clip, _ = self._pending_phrase
             self._pending_phrase = None
+            self._phrase_channel.set_volume(1.0)
+            self._phrase_channel.play(clip)
+        # At most one utterance clip per frame: two launched back-to-back on the
+        # one phrase channel would cut the first off mid-word.
+        if self._utterance and now >= self._utterance[0][1]:
+            clip, _ = self._utterance.pop(0)
+            self._utterance_active = True
             self._phrase_channel.set_volume(1.0)
             self._phrase_channel.play(clip)
         bed_volume = self._duck.factor(now)

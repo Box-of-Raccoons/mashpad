@@ -24,3 +24,6 @@ packaging/out/
 
 # Superpowers brainstorming visual-companion sessions — never committed.
 .superpowers/
+
+# Git worktrees for isolated parallel work — never committed.
+.worktrees/

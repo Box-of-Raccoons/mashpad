@@ -122,6 +122,10 @@ PHRASE_DUCK_TAIL_S = 0.35
 # Seconds the bed takes to fade back to full volume after the tail.
 PHRASE_DUCK_FADE_UP_S = 0.5
 
+# Silence between the clips of a multi-word utterance ("find the letter" … "B"),
+# in seconds. The bed stays ducked across the gap, so this is pacing, not a hole.
+UTTERANCE_GAP_S = 0.35
+
 # Uniform-random window (min, max spawns) between "fun" phrase re-arms.
 FUN_EVERY_SPAWNS = (250, 400)
 

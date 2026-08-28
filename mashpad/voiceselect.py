@@ -26,6 +26,13 @@ class VoiceSelector:
 
     def __init__(self, voices, mode: str, genders, rng: "_random.Random") -> None:
         self._voices = list(voices)
+        # Packs named with a leading underscore (the generated _placeholder) are
+        # reachable only by explicit name. Audio.voices is sorted, so "_x" would
+        # otherwise seed cycle mode, join every random draw, and — being
+        # unknown-gender — be the PREFERRED cycle step, undoing the guarantee
+        # that curated packs keep robot TTS out of the rotation. Falling back to
+        # the full list keeps an all-underscore install from going silent.
+        self._rotation = [v for v in self._voices if not v.startswith("_")] or list(self._voices)
         self._mode = mode
         # voice name → "male" | "female" | None (unknown packs have None).
         self._genders = dict(genders or {})
@@ -47,9 +54,9 @@ class VoiceSelector:
             return None
         mode = self._effective_mode()
         if mode == settings_mod.VOICE_MODE_CYCLE:
-            return self._voices[0]
+            return self._rotation[0]
         if mode == settings_mod.VOICE_MODE_RANDOM:
-            return self._rng.choice(self._voices)
+            return self._rng.choice(self._rotation)
         return mode                    # fixed voice
 
     def current(self):
@@ -67,7 +74,7 @@ class VoiceSelector:
             return
         mode = self._effective_mode()
         if mode == settings_mod.VOICE_MODE_RANDOM:
-            self._current = self._rng.choice(self._voices)
+            self._current = self._rng.choice(self._rotation)
         elif mode == settings_mod.VOICE_MODE_CYCLE:
             return                     # trigger-driven; stays put per keystroke
         else:
@@ -87,12 +94,12 @@ class VoiceSelector:
             return
         if self._effective_mode() != settings_mod.VOICE_MODE_CYCLE:
             return
-        n = len(self._voices)
+        n = len(self._rotation)
         cur_gender = self._genders.get(self._current)
         chosen = None
         for step in range(1, n + 1):
             idx = (self._cycle_index + step) % n
-            g = self._genders.get(self._voices[idx])
+            g = self._genders.get(self._rotation[idx])
             # Accept when: next voice has unknown gender (it may be a gender change,
             # and excluding it forever is worse), OR the current voice's gender is
             # unknown (any next voice is a valid step), OR genders differ.
@@ -104,4 +111,4 @@ class VoiceSelector:
         if chosen is None:
             chosen = (self._cycle_index + 1) % n   # plain round-robin fallback
         self._cycle_index = chosen
-        self._current = self._voices[chosen]
+        self._current = self._rotation[chosen]
