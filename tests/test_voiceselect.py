@@ -200,6 +200,63 @@ def test_cycle_known_gender_alternation_unchanged_with_six_voices():
 
 
 # ---------------------------------------------------------------------------
+# Underscore-prefixed packs are excluded from automatic rotation
+# ---------------------------------------------------------------------------
+
+def test_random_never_picks_underscore_pack():
+    voices = ["_placeholder", "a", "b"]
+    sel = VoiceSelector(voices, "random", {}, _rng(1))
+    seen = {sel.current()}
+    for _ in range(500):
+        sel.on_keystroke()
+        seen.add(sel.current())
+    assert "_placeholder" not in seen
+    assert seen == {"a", "b"}
+
+
+def test_cycle_does_not_seed_underscore_pack():
+    # "_placeholder" sorts first, which is exactly where cycle mode seeds.
+    sel = VoiceSelector(["_placeholder", "a", "b"], "cycle", {}, _rng())
+    assert sel.current() == "a"
+
+
+def test_cycle_never_steps_to_underscore_pack():
+    # Unknown gender is the PREFERRED cycle step, so an included "_placeholder"
+    # would show up constantly.
+    voices = ["_placeholder", "m1", "f1"]
+    genders = {"m1": "male", "f1": "female"}
+    sel = VoiceSelector(voices, "cycle", genders, _rng())
+    seen = {sel.current()}
+    for _ in range(20):
+        sel.on_trigger()
+        seen.add(sel.current())
+    assert "_placeholder" not in seen
+    assert seen == {"m1", "f1"}
+
+
+def test_underscore_pack_reachable_by_explicit_name():
+    sel = VoiceSelector(["_placeholder", "a", "b"], "_placeholder", {}, _rng())
+    assert sel.current() == "_placeholder"
+    for _ in range(20):
+        sel.on_keystroke()
+        sel.on_trigger()
+        assert sel.current() == "_placeholder"
+
+
+def test_all_underscore_packs_fall_back_to_using_them():
+    voices = ["_one", "_two"]
+    sel = VoiceSelector(voices, "random", {}, _rng(1))
+    assert sel.current() in voices          # not None, not silent
+    for _ in range(50):
+        sel.on_keystroke()
+        assert sel.current() in voices
+    cyc = VoiceSelector(voices, "cycle", {}, _rng())
+    assert cyc.current() == "_one"
+    cyc.on_trigger()
+    assert cyc.current() == "_two"
+
+
+# ---------------------------------------------------------------------------
 # Purity
 # ---------------------------------------------------------------------------
 

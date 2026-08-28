@@ -39,6 +39,18 @@ class DuckWindow:
         self._hold_end = max(self._hold_end, start + duration + config.PHRASE_DUCK_TAIL_S)
         return start
 
+    def release(self, now: float) -> None:
+        """End the hold at *now* so the fade-up starts immediately.
+
+        Cancelling an utterance stops the speech but leaves _hold_end at the dead
+        utterance's precomputed end — for a long ask that would mute the bed for
+        tens of seconds after the round already changed. _fade_start is left
+        alone so factor() still ramps over FADE_UP_S instead of snapping to 1.0.
+        """
+        if self._fade_start is None:
+            return                 # nothing ever opened — nothing to release
+        self._hold_end = min(self._hold_end, now)
+
     def factor(self, now: float) -> float:
         """Bed (non-phrase) channel volume at *now*, in [FACTOR, 1.0]."""
         if self._fade_start is None or now < self._fade_start:

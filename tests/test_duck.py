@@ -53,6 +53,50 @@ def test_reopening_extends_without_popping():
     assert duck.factor(t2 + LEAD + 1.9) == F
 
 
+def test_release_starts_fade_up_now():
+    duck = DuckWindow()
+    start = duck.open(10.0, 30.0)          # a long ask: hold runs ~30s
+    t = start + 1.0
+    assert duck.factor(t) == F             # still fully ducked before release
+    duck.release(t)
+    # the fade-up now runs from t, not from the dead utterance's end
+    mid = duck.factor(t + UP / 2)
+    assert abs(mid - (1.0 + F) / 2) < 1e-9
+    assert duck.factor(t + UP + 0.01) == 1.0
+
+
+def test_release_is_continuous_no_jump_to_full():
+    duck = DuckWindow()
+    start = duck.open(10.0, 30.0)
+    t = start + 1.0
+    before = duck.factor(t)
+    duck.release(t)
+    after = duck.factor(t)
+    assert after == before == F            # no pop to 1.0 at the release instant
+    assert duck.factor(t + 0.01) < 0.5     # ramping, still nowhere near full
+
+
+def test_release_without_open_is_noop():
+    duck = DuckWindow()
+    duck.release(5.0)
+    assert duck.factor(5.0) == 1.0
+    assert duck.factor(0.0) == 1.0
+    # and a later window still opens normally
+    s = duck.open(10.0, 1.0)
+    assert duck.factor(s + 0.5) == F
+
+
+def test_release_after_close_changes_nothing():
+    duck = DuckWindow()
+    start = duck.open(10.0, 1.0)
+    hold_end = start + 1.0 + TAIL
+    t = hold_end + UP + 5.0                # window long since closed
+    assert duck.factor(t) == 1.0
+    duck.release(t)
+    assert duck.factor(t) == 1.0           # not re-opened, not re-ducked
+    assert duck.factor(hold_end - 0.01) == F   # the past envelope is untouched
+
+
 def test_duck_no_pygame():
     import mashpad.duck  # noqa: F401
     assert "pygame" not in sys.modules, "duck imported pygame!"
