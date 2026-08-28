@@ -224,6 +224,11 @@ class Menu:
             self._settings.math_range, settings_mod.MATH_RANGES, direction or 1)
         self._save()
 
+    def _step_math_ops(self, direction: int) -> None:
+        self._settings.math_ops = self._cycle(
+            self._settings.math_ops, settings_mod.MATH_OPS, direction or 1)
+        self._save()
+
     def _save(self) -> None:
         settings_mod.save(self._settings, self._save_path)
 
@@ -237,6 +242,12 @@ class Menu:
             return "Cycle"
         # Friendly label for a known pack; unknown packs fall back to name.title().
         return config.voice_label(v)
+
+    _MATH_OP_LABELS = {
+        "add": "Adding",
+        "subtract": "Taking away",
+        "both": "Both",
+    }
 
     _CHALLENGE_LABELS = {
         "none": "Off",
@@ -271,6 +282,8 @@ class Menu:
         if s.challenge == "math":
             rows.append(("math_range", "Numbers",
                          "2 to 9" if s.math_range == "2-9" else "0 to 20"))
+            rows.append(("math_ops", "Sums",
+                         self._MATH_OP_LABELS.get(s.math_ops, "Both")))
         rows.append(("quit", "Quit", ""))
         return rows
 

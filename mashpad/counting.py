@@ -58,20 +58,26 @@ def spoken_total(target: str) -> str:
     return spoken(total(target))
 
 
-def pool(tier: str):
+def pool(tier: str, ops: str = "both"):
     """[(target, answer), ...] for *tier* — every sum it is allowed to ask.
 
     Both groups of an addition hold at least one block: an empty pile is nothing
     to count and reads as a drawing bug. Subtraction is bounded by its operands
     rather than its result, so answers of 0 and 1 are allowed and deliberate.
+
+    *ops* narrows the pool to "add" or "subtract"; anything else asks both. A
+    child who has only just met counting can stay on adding, where every round
+    is one pile joining another, until taking away means something.
     """
     top = TIER_MAX.get(tier, TIER_MAX["2-9"])
     entries = []
-    for a in range(1, top + 1):
-        for b in range(1, top + 1):
-            if 2 <= a + b <= top:
-                entries.append(f"{a}+{b}")
-    for a in range(2, top + 1):
-        for b in range(1, a + 1):
-            entries.append(f"{a}-{b}")
+    if ops != "subtract":
+        for a in range(1, top + 1):
+            for b in range(1, top + 1):
+                if 2 <= a + b <= top:
+                    entries.append(f"{a}+{b}")
+    if ops != "add":
+        for a in range(2, top + 1):
+            for b in range(1, a + 1):
+                entries.append(f"{a}-{b}")
     return [(t, answer(t)) for t in entries]

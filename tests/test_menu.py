@@ -298,7 +298,7 @@ def test_panel_fits_with_every_row_visible():
     _ok("""
 m, s, a = make()
 s.challenge = "math"
-assert len(m._rows()) == 11, labels(m)
+assert len(m._rows()) == 12, labels(m)
 screen = pygame.Surface((1280, 720))
 m.draw(screen)
 assert m.panel_height(720) <= 720, m.panel_height(720)
@@ -360,4 +360,66 @@ m, s, a = make()
 screen = pygame.Surface((1280, 720))
 m.draw(screen)
 assert m.panel_height(720) <= 720, m.panel_height(720)
+""")
+
+
+# ---------------------------------------------------------------------------
+# The Sums row (which kind of sum the math challenge asks)
+# ---------------------------------------------------------------------------
+
+def test_sums_row_appears_only_for_math():
+    _ok("""
+m, s, a = make()
+s.challenge = "spell"
+assert "Sums" not in labels(m), labels(m)
+s.challenge = "math"
+assert "Sums" in labels(m), labels(m)
+""")
+
+
+def test_sums_row_cycles_through_all_three():
+    _ok("""
+from mashpad import settings as settings_mod
+m, s, a = make()
+s.challenge = "math"
+select(m, "Sums")
+seen = set()
+for _ in range(len(settings_mod.MATH_OPS) + 2):
+    seen.add(s.math_ops)
+    m.handle_event(key(pygame.K_RIGHT))
+assert seen == set(settings_mod.MATH_OPS), seen
+""")
+
+
+def test_sums_row_steps_backwards_too():
+    _ok("""
+m, s, a = make()
+s.challenge = "math"
+select(m, "Sums")
+m.handle_event(key(pygame.K_LEFT))
+assert s.math_ops != "both", s.math_ops
+""")
+
+
+def test_sums_row_reads_in_plain_words():
+    _ok("""
+m, s, a = make()
+s.challenge = "math"
+for value, want in (("add", "Adding"), ("subtract", "Taking away"),
+                    ("both", "Both")):
+    s.math_ops = value
+    row = [r for r in m._row_specs() if r[0] == "math_ops"][0]
+    assert row[2] == want, row
+""")
+
+
+def test_changing_sums_is_saved_immediately():
+    _ok("""
+m, s, a = make()
+s.challenge = "math"
+select(m, "Sums")
+m.handle_event(key(pygame.K_RIGHT))
+import json
+saved = json.loads(Path(m._save_path).read_text(encoding="utf-8"))
+assert saved["math_ops"] == s.math_ops, saved
 """)

@@ -71,6 +71,31 @@ def test_an_unknown_tier_falls_back_to_the_small_one():
     assert counting.pool("nonsense") == counting.pool("2-9")
 
 
+def test_asking_only_one_kind_of_sum():
+    # A child who has only just met counting can stay on adding until taking
+    # away means something.
+    adding = counting.pool("2-9", "add")
+    assert adding, "empty pool"
+    assert all(op == "+" for _t, _a in adding
+               for op in [counting.parse(_t)[1]]), adding[:5]
+    taking = counting.pool("2-9", "subtract")
+    assert taking
+    assert all(counting.parse(t)[1] == "-" for t, _a in taking)
+
+
+def test_both_is_the_two_halves_and_nothing_else():
+    both = counting.pool("0-20", "both")
+    halves = counting.pool("0-20", "add") + counting.pool("0-20", "subtract")
+    assert sorted(both) == sorted(halves)
+
+
+def test_an_unknown_op_asks_everything():
+    # A hand-edited settings.json must never produce an empty pool: the
+    # director raises on its first draw from one.
+    assert counting.pool("2-9", "nonsense") == counting.pool("2-9", "both")
+    assert counting.pool("2-9") == counting.pool("2-9", "both")
+
+
 def test_a_number_past_nine_is_spoken_as_a_word_everywhere():
     # speak() is all-or-nothing, so one raw "12" anywhere in a sentence runs the
     # whole round silent. Every number reaching an utterance goes through here.

@@ -63,7 +63,29 @@ def test_save_writes_all_keys(tmp_path):
     assert set(data) == {
         "voice_mode", "volume", "letter_case", "raccoon_amount", "phrases",
         "sound_mode", "display_mode", "challenge", "answer_style", "math_range",
+        "math_ops",
     }
+
+
+def test_math_ops_defaults_to_asking_both(tmp_path):
+    assert Settings().math_ops == "both"
+
+
+def test_a_bad_math_ops_falls_back_without_losing_its_siblings(tmp_path):
+    p = tmp_path / "settings.json"
+    p.write_text(json.dumps({"math_ops": "divide", "volume": 40}),
+                 encoding="utf-8")
+    s = load(p)
+    assert s.math_ops == "both"
+    assert s.volume == 40
+
+
+def test_math_ops_round_trips(tmp_path):
+    p = tmp_path / "settings.json"
+    s = Settings()
+    s.math_ops = "subtract"
+    save(s, p)
+    assert load(p).math_ops == "subtract"
 
 
 def test_save_atomic_leaves_no_tmp(tmp_path):

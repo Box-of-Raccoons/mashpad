@@ -291,7 +291,8 @@ def main(argv=None) -> None:
                         if app_settings.answer_style == "guided"
                         else config.SPELL_WORDS_ADVANCED)
             elif app_settings.challenge == "math":
-                pool = counting.pool(app_settings.math_range)
+                pool = counting.pool(app_settings.math_range,
+                                     app_settings.math_ops)
             return ChallengeDirector(
                 app_settings.challenge, rng,
                 art_names=[e.name for e in _image_entries],
@@ -306,7 +307,8 @@ def main(argv=None) -> None:
             words never appear until a reboot.
             """
             return (app_settings.challenge, app_settings.display_mode,
-                    app_settings.answer_style, app_settings.math_range)
+                    app_settings.answer_style, app_settings.math_range,
+                    app_settings.math_ops)
 
         challenge = _build_challenge()
         # The signature as it was when the menu opened — a change rebuilds the
