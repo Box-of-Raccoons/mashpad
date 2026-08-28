@@ -24,6 +24,14 @@ SOUND_MODES = ("piano", "dings")
 # Display modes: "smash" (classic big-glyph key smasher) | "babyide" (prints
 # Mashpad's own source one token per keypress). Selected in the grown-up menu.
 DISPLAY_MODES = ("smash", "babyide")
+# Challenge layer, orthogonal to DISPLAY_MODES: what (if anything) the announcer
+# asks the child to find. "none" is today's pure key-smashing.
+CHALLENGES = ("none", "letter", "number", "spell", "math")
+# How an unfilled answer slot is drawn: "guided" shows the letter/digit greyed,
+# "advanced" shows a blank underscore. Shared by spelling and two-digit sums.
+ANSWER_STYLES = ("guided", "advanced")
+# Operand range for the math challenge. "0-20" answers need two key presses.
+MATH_RANGES = ("2-9", "0-20")
 # Voice-mode selection constants.
 VOICE_MODE_RANDOM = "random"
 VOICE_MODE_CYCLE = "cycle"
@@ -46,6 +54,12 @@ class Settings:
     sound_mode: str = "piano"
     # "smash" (classic big glyphs) | "babyide" (prints Mashpad's own source).
     display_mode: str = "smash"
+    # "none" | "letter" | "number" | "spell" | "math" — the ask layered over smash.
+    challenge: str = "none"
+    # "guided" (greyed letters) | "advanced" (blank slots) for answer rows.
+    answer_style: str = "guided"
+    # "2-9" (single-key answers) | "0-20" (two-digit answers) for the math ask.
+    math_range: str = "2-9"
 
 
 def _from_dict(raw: dict) -> Settings:
@@ -87,6 +101,18 @@ def _from_dict(raw: dict) -> Settings:
     if dm in DISPLAY_MODES:
         s.display_mode = dm
 
+    ch = raw.get("challenge")
+    if ch in CHALLENGES:
+        s.challenge = ch
+
+    as_ = raw.get("answer_style")
+    if as_ in ANSWER_STYLES:
+        s.answer_style = as_
+
+    mr = raw.get("math_range")
+    if mr in MATH_RANGES:
+        s.math_range = mr
+
     return s
 
 
@@ -120,6 +146,9 @@ def save(settings: Settings, path: Path) -> bool:
         "phrases": settings.phrases,
         "sound_mode": settings.sound_mode,
         "display_mode": settings.display_mode,
+        "challenge": settings.challenge,
+        "answer_style": settings.answer_style,
+        "math_range": settings.math_range,
     }
     try:
         with open(tmp, "w", encoding="utf-8") as fh:

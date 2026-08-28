@@ -185,3 +185,26 @@ BABYIDE_TOKEN_COLORS = {
 
 # BabyIDE: point size of the fake editor tab showing the current filename.
 BABYIDE_TAB_FONT_PX = 32
+
+# Challenge: seconds a press must be spaced from the last COUNTED press to count
+# toward hint escalation. Without this the ladder measures mash rate rather than
+# deliberate attempts — BUCKET_REFILL_PER_S is 6.0 and SLOWDOWN_DROPS treats 6
+# drops in 3s as ordinary play, so a masher would reach the any-key step in
+# about four seconds every round.
+CHALLENGE_PRESS_SPACING_S = 0.7
+
+# Challenge hint ladder: (counted presses, seconds) floors per step, BOTH
+# required. A None press floor means time-only — step 3 (the any-key gimme)
+# is time-only because a child who has stopped pressing is exactly who it
+# rescues. The highest step whose floors are met wins, so a stuck child skips
+# straight to the gimme instead of waiting out the lower rungs.
+CHALLENGE_LADDER = ((4, 10.0), (8, 25.0), (None, 45.0))
+
+# Challenge: seconds without any input after which the round parks — no further
+# hints fire, and the next press resets the ladder and re-announces. Keeps an
+# idling Pi from nagging an empty room, and keeps a returning child from walking
+# into a context-free instant win.
+CHALLENGE_IDLE_S = 120.0
+
+# Challenge: seconds of celebration after a win before the next ask.
+CHALLENGE_WIN_BEAT_S = 1.5
