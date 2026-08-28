@@ -32,6 +32,9 @@ CHALLENGES = ("none", "letter", "number", "spell", "math")
 ANSWER_STYLES = ("guided", "advanced")
 # Operand range for the math challenge. "0-20" answers need two key presses.
 MATH_RANGES = ("2-9", "0-20")
+# Which sums the math challenge asks. Adding is the easier half, and a child
+# who has just met counting can stay on it until taking away makes sense.
+MATH_OPS = ("add", "subtract", "both")
 # Voice-mode selection constants.
 VOICE_MODE_RANDOM = "random"
 VOICE_MODE_CYCLE = "cycle"
@@ -60,6 +63,8 @@ class Settings:
     answer_style: str = "guided"
     # "2-9" (single-key answers) | "0-20" (two-digit answers) for the math ask.
     math_range: str = "2-9"
+    # "add" | "subtract" | "both" — which sums the math ask draws from.
+    math_ops: str = "both"
 
 
 def _from_dict(raw: dict) -> Settings:
@@ -113,6 +118,10 @@ def _from_dict(raw: dict) -> Settings:
     if mr in MATH_RANGES:
         s.math_range = mr
 
+    mo = raw.get("math_ops")
+    if mo in MATH_OPS:
+        s.math_ops = mo
+
     return s
 
 
@@ -149,6 +158,7 @@ def save(settings: Settings, path: Path) -> bool:
         "challenge": settings.challenge,
         "answer_style": settings.answer_style,
         "math_range": settings.math_range,
+        "math_ops": settings.math_ops,
     }
     try:
         with open(tmp, "w", encoding="utf-8") as fh:
