@@ -785,6 +785,12 @@ def challenge_blocks_layout(width: int, height: int, target: str, slots: int,
     }
 
 
+def _rect(box):
+    """An (x, y, w, h) keep-out tuple back as a Rect."""
+    x, y, w, h = box
+    return pygame.Rect(int(round(x)), int(round(y)), int(round(w)), int(round(h)))
+
+
 def _bounds(rects):
     """Bounding rect of *rects*, or a zero rect when there are none."""
     if not rects:
@@ -913,14 +919,56 @@ def _draw_minus_numerals(screen, font, layout, color_a, num_y) -> None:
         x += surf.get_width() + gap
 
 
+# Fractions of a scaled item's half-width the keep-out tries to add, so that a
+# glyph's EDGE clears the overlay instead of only its centre. Tried in this
+# order and the first workable one wins: a seven-letter row plus full clearance
+# is wider than every spawn position a 1280x720 screen has, and a box with
+# nowhere left outside it excludes nothing at all.
+CHALLENGE_CLEARANCE_STEPS = (1.0, 0.75, 0.5, 0.25, 0.0)
+
+
+def _with_clearance(box, width: int, height: int):
+    """Grow *box* by as much of an item's reach as still leaves somewhere to spawn.
+
+    The box only ever constrains a spawn's CENTRE, and a challenge glyph is
+    CHALLENGE_ITEM_SCALE of ITEM_SIZE_PX across, so a letter centred exactly on
+    the edge still lands half its own width inside the overlay. Growing the box
+    by that half-width is what keeps letters off the word being spelled.
+
+    It cannot always be the full half-width: on a narrow screen a long word plus
+    full clearance leaves no valid band, and spawn_position would then fall back
+    to an unconstrained sample, which is worse than a partial overlap. So the
+    clearance shrinks until a band survives.
+    """
+    reach = config.ITEM_SIZE_PX * config.CHALLENGE_ITEM_SCALE / 2.0
+    half = config.ITEM_SIZE_PX / 2.0
+    for step in CHALLENGE_CLEARANCE_STEPS:
+        grown = box.inflate(int(round(2 * reach * step)),
+                            int(round(2 * reach * step)))
+        if _spawn_bands(half, half, width - half, height - half,
+                        (grown.left, grown.top, grown.width, grown.height)):
+            return grown
+    return box
+
+
+def _boxed(rect):
+    """A keep-out rect as the (x, y, w, h) tuple the spawner takes."""
+    return (float(rect.left), float(rect.top), float(rect.width),
+            float(rect.height))
+
+
 def challenge_round_keepout(width: int, height: int, round_):
-    """Keep-out box for whichever overlay *round_* draws, or the plain target box."""
-    if round_ is None:
-        return challenge_keepout(width, height)
+    """Keep-out box for whichever overlay *round_* draws, or the plain target box.
+
+    Every path here adds the glyph clearance, so one rule covers all five
+    challenges: what the overlay draws, plus half a smash glyph.
+    """
+    if round_ is None or round_.kind not in ("spell", "math"):
+        return _boxed(_with_clearance(_rect(challenge_keepout(width, height)),
+                                      width, height))
     if round_.kind == "spell":
-        return challenge_keepout(width, height, len(round_.answer))
-    if round_.kind != "math":
-        return challenge_keepout(width, height)
+        box = _rect(challenge_keepout(width, height, len(round_.answer)))
+        return _boxed(_with_clearance(box, width, height))
     layout = challenge_blocks_layout(width, height, round_.target,
                                      len(round_.answer), True)
     box = _bounds(layout["blocks_a"] + layout["blocks_b"] + layout["result"]
@@ -945,4 +993,4 @@ def challenge_round_keepout(width: int, height: int, round_):
         run.center = (centerx, num_y)
         box.union_ip(run)
     box.inflate_ip(2 * CHALLENGE_SLOT_MARGIN_PX, 2 * CHALLENGE_SLOT_MARGIN_PX)
-    return (float(box.left), float(box.top), float(box.width), float(box.height))
+    return _boxed(_with_clearance(box, width, height))

@@ -604,3 +604,111 @@ assert counting.answer("5-5") == ("0",)
 layout = draw(sum_view("5-5"))
 assert layout["result"] == []          # nothing left to show
 """)
+
+
+# ---------------------------------------------------------------------------
+# Glyph clearance: a smash letter must not land ON the answer
+# ---------------------------------------------------------------------------
+
+_CLEAR = r"""
+from mashpad.challenge import Round
+
+REACH = config.ITEM_SIZE_PX * config.CHALLENGE_ITEM_SCALE / 2.0
+HALF = config.ITEM_SIZE_PX / 2.0
+
+
+def spell_round(word):
+    return Round(kind="spell", target=word, answer=tuple(word), art=word)
+
+
+def drawn_bounds(w, h, word):
+    art, cells = render.challenge_slot_layout(w, h, len(word))
+    box = art.copy()
+    for c in cells:
+        box.union_ip(c)
+    return box
+
+
+def worst_overlap(w, h, round_, drawn, samples=400):
+    # Widest a spawned glyph's own rect pushes into what the overlay draws.
+    box = render.challenge_round_keepout(w, h, round_)
+    rng = random.Random(19)
+    worst = 0
+    for _ in range(samples):
+        x, y = render.spawn_position(rng, w, h, HALF, box)
+        item = pygame.Rect(0, 0, int(2 * REACH), int(2 * REACH))
+        item.center = (int(x), int(y))
+        hit = item.clip(drawn)
+        worst = max(worst, min(hit.width, hit.height))
+    return worst
+"""
+
+
+def test_a_smash_glyph_never_lands_on_the_word_being_spelled():
+    _ok(_CLEAR + r"""
+# The keep-out constrains a spawn's centre, and a challenge glyph is 196px
+# across, so the box has to carry half a glyph of clearance or letters land on
+# the row. This is the bug in the DRUM screenshot.
+for w, h in ((1280, 720), (1920, 1080)):
+    for word in config.SPELL_WORDS_GUIDED:
+        drawn = drawn_bounds(w, h, word)
+        assert worst_overlap(w, h, spell_round(word), drawn) == 0, (w, h, word)
+""")
+
+
+def test_the_advanced_words_stay_clear_at_the_pi_resolution():
+    _ok(_CLEAR + r"""
+for word in config.SPELL_WORDS_ADVANCED:
+    drawn = drawn_bounds(1920, 1080, word)
+    assert worst_overlap(1920, 1080, spell_round(word), drawn) == 0, word
+""")
+
+
+def test_the_longest_word_degrades_on_a_narrow_screen_rather_than_giving_up():
+    _ok(_CLEAR + r"""
+# BUBBLES is seven slots. At 1280x720 the row plus full clearance is wider than
+# every spawn position the screen has, so the clearance shrinks until a band
+# survives. That is a smaller overlap, not the unconstrained sample a vanished
+# band would produce.
+drawn = drawn_bounds(1280, 720, "bubbles")
+got = worst_overlap(1280, 720, spell_round("bubbles"), drawn)
+assert got < REACH / 2, got
+# The box still excludes centres outright, which is the floor this can reach.
+box = render.challenge_round_keepout(1280, 720, spell_round("bubbles"))
+bx, by, bw, bh = box
+rng = random.Random(2)
+for _ in range(400):
+    x, y = render.spawn_position(rng, 1280, 720, HALF, box)
+    assert not (bx <= x <= bx + bw and by <= y <= by + bh), (x, y)
+""")
+
+
+def test_a_smash_glyph_never_lands_on_a_counting_sum():
+    _ok(_CLEAR + r"""
+from mashpad import counting
+for tier, (w, h) in (("2-9", (1280, 720)), ("0-20", (1920, 1080))):
+    for target, answer in counting.pool(tier):
+        round_ = Round(kind="math", target=target, answer=answer, art=None)
+        layout = render.challenge_blocks_layout(w, h, target, len(answer), True)
+        drawn = render._bounds(layout["blocks_a"] + layout["blocks_b"]
+                               + layout["result"] + layout["cells"])
+        assert worst_overlap(w, h, round_, drawn, samples=60) == 0, (tier, target)
+""")
+
+
+def test_the_plain_target_gets_the_same_clearance():
+    _ok(_CLEAR + r"""
+# One rule for all five challenges: the ghost letter is 280px and a smash glyph
+# reaching 98px into it was always a near miss.
+w, h = 1280, 720
+box = render.challenge_round_keepout(w, h, None)
+glyph = pygame.Rect(0, 0, config.ITEM_SIZE_PX, config.ITEM_SIZE_PX)
+glyph.center = (w // 2, h // 2)
+rng = random.Random(8)
+for _ in range(400):
+    x, y = render.spawn_position(rng, w, h, HALF, box)
+    item = pygame.Rect(0, 0, int(2 * REACH), int(2 * REACH))
+    item.center = (int(x), int(y))
+    hit = item.clip(glyph)
+    assert min(hit.width, hit.height) == 0, (x, y)
+""")
