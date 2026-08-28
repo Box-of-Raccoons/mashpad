@@ -82,7 +82,53 @@ from mashpad import settings as settings_mod
 # main() only builds a director for a value the menu can actually select, so a
 # hand-edited settings.json naming a later slice cannot draw from an empty pool.
 assert set(IMPLEMENTED_CHALLENGES) <= set(settings_mod.CHALLENGES)
-assert "spell" not in IMPLEMENTED_CHALLENGES
 assert "math" not in IMPLEMENTED_CHALLENGES
 assert "letter" in IMPLEMENTED_CHALLENGES and "number" in IMPLEMENTED_CHALLENGES
+assert "spell" in IMPLEMENTED_CHALLENGES
+""")
+
+
+# ---------------------------------------------------------------------------
+# Spelling utterances
+# ---------------------------------------------------------------------------
+
+_SPELL = r"""
+SPELL = Round(kind="spell", target="book", answer=tuple("book"), art="book")
+"""
+
+
+def test_a_spelling_ask_names_the_word():
+    _ok(_SPELL + r"""
+assert stems(SPELL, 0) == ("can-you-spell", "book"), stems(SPELL, 0)
+assert stems(SPELL, 1) == stems(SPELL, 0)
+""")
+
+
+def test_a_spelling_hint_names_the_letter_the_row_is_waiting_on():
+    _ok(_SPELL + r"""
+# Stuck on the second O of BOOK, the useful help is "find the letter O", not
+# the word again — the word is what they already heard twice.
+assert stems(SPELL, 2, 2) == ("find-the-letter", "o"), stems(SPELL, 2, 2)
+assert stems(SPELL, 2, 0) == ("find-the-letter", "b"), stems(SPELL, 2, 0)
+""")
+
+
+def test_the_spelling_gimme_just_says_the_letter():
+    _ok(_SPELL + r"""
+assert stems(SPELL, 3, 3) == ("k",), stems(SPELL, 3, 3)
+""")
+
+
+def test_a_finished_spelling_round_does_not_run_off_its_answer():
+    _ok(_SPELL + r"""
+# progress lands on len(answer) the instant the word is won, and poll can still
+# ask for stems on that frame.
+assert stems(SPELL, 3, len(SPELL.answer)) == ("k",)
+""")
+
+
+def test_letter_and_number_stems_are_untouched_by_the_progress_argument():
+    _ok(r"""
+assert stems(LETTER, 0, 3) == ("find-the-letter", "b")
+assert stems(NUMBER, 2, 3) == ("7",)
 """)

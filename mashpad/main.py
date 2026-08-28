@@ -81,13 +81,24 @@ def _scaled(surface, scale: float):
     )
 
 
-def _challenge_stems(round_, level: int) -> tuple[str, ...]:
+def _challenge_stems(round_, level: int, progress: int = 0) -> tuple[str, ...]:
     """Stems for one challenge utterance: the ask, or a hint rung.
 
     Level 0 is both the opening ask and the re-announce a parked round emits on
     the next press, so it must speak the full carrier again — a child returning
     after twenty minutes gets no context from a bare "B".
+
+    A spelling round's hints name the letter the row is waiting on, so they need
+    *progress* as well as the round: "book" is the ask, but the help a child
+    stuck on the second O needs is "find the letter O".
     """
+    if round_.kind == "spell":
+        current = round_.answer[min(progress, len(round_.answer) - 1)]
+        if level <= 1:
+            return ("can-you-spell", round_.target)
+        if level == 2:
+            return ("find-the-letter", current)
+        return (current,)
     if level <= 1:
         carrier = ("find-the-number" if round_.kind == "number"
                    else "find-the-letter")
@@ -249,15 +260,31 @@ def main(argv=None) -> None:
                     or app_settings.challenge == "none"
                     or app_settings.challenge not in IMPLEMENTED_CHALLENGES):
                 return None
+            pool = None
+            if app_settings.challenge == "spell":
+                pool = (config.SPELL_WORDS_GUIDED
+                        if app_settings.answer_style == "guided"
+                        else config.SPELL_WORDS_ADVANCED)
             return ChallengeDirector(
                 app_settings.challenge, rng,
                 art_names=[e.name for e in _image_entries],
+                pool=pool,
             )
 
+        def _challenge_signature():
+            """The settings a director is built from — a change rebuilds it.
+
+            answer_style is in here because it picks the word pool, not just the
+            drawing: switching Answers has to deal a new bag, or the advanced
+            words never appear until a reboot.
+            """
+            return (app_settings.challenge, app_settings.display_mode,
+                    app_settings.answer_style, app_settings.math_range)
+
         challenge = _build_challenge()
-        # (challenge, display_mode) as they were when the menu opened — a change
-        # rebuilds the director on close, so the row isn't dead until a reboot.
-        menu_open_challenge = (app_settings.challenge, app_settings.display_mode)
+        # The signature as it was when the menu opened — a change rebuilds the
+        # director on close, so the row isn't dead until a reboot.
+        menu_open_challenge = _challenge_signature()
         # The pack speaking the current round; resolved once per ask, None = silent.
         challenge_voice = None
 
@@ -323,6 +350,9 @@ def main(argv=None) -> None:
         # display_mode == "babyide".
         babyide_state_path = paths.data_dir() / config.BABYIDE_STATE_FILE
         tab_font = pygame.font.Font(str(font_path), config.BABYIDE_TAB_FONT_PX)
+        # Answer slots are a fraction of an item glyph, so they get their own
+        # font rather than a per-frame scale of the 280px one.
+        slot_font = pygame.font.Font(str(font_path), config.CHALLENGE_SLOT_PX)
         tab_h = tab_font.get_linesize() + 16
 
         def _read_source(name):
@@ -351,7 +381,12 @@ def main(argv=None) -> None:
             item_scale = config.CHALLENGE_ITEM_SCALE if challenge_on else 1.0
             max_items = (config.CHALLENGE_MAX_ITEMS if challenge_on
                          else config.MAX_ITEMS)
-            keepout = render.challenge_keepout(width, height) if challenge_on else None
+            slots = 1
+            if (challenge_on and challenge.round is not None
+                    and challenge.round.kind in ("spell", "math")):
+                slots = len(challenge.round.answer)
+            keepout = (render.challenge_keepout(width, height, slots)
+                       if challenge_on else None)
 
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -372,8 +407,7 @@ def main(argv=None) -> None:
                             )
                         # A Challenge or Display change takes effect on close, not
                         # at the next boot — the grown-up is watching the screen.
-                        if ((app_settings.challenge, app_settings.display_mode)
-                                != menu_open_challenge):
+                        if _challenge_signature() != menu_open_challenge:
                             challenge = _build_challenge()
                             challenge_voice = None
                     continue
@@ -395,8 +429,7 @@ def main(argv=None) -> None:
                         continue
                     if combo == combos.OPTIONS:
                         menu_open_voice_mode = app_settings.voice_mode
-                        menu_open_challenge = (app_settings.challenge,
-                                               app_settings.display_mode)
+                        menu_open_challenge = _challenge_signature()
                         menu.open()
                         continue
                     if app_settings.display_mode == "babyide":
@@ -532,12 +565,13 @@ def main(argv=None) -> None:
                         level = 0 if kind == "ask" else payload
                         if kind == "ask":
                             challenge_voice = audio.challenge_voice(
-                                _challenge_stems(round_, 0),
+                                _challenge_stems(round_, 0, challenge.progress),
                                 preferred=selector.current())
                         print(f"[mashpad] challenge {kind} {round_.target!r} "
                               f"step {level} ({challenge_voice or 'silent'})")
                         if challenge_voice is not None:
-                            stems = _challenge_stems(round_, level)
+                            stems = _challenge_stems(round_, level,
+                                                     challenge.progress)
                             if not audio.speak(stems, challenge_voice, rng, now):
                                 # A pack with the ask but no "B for balloon" still
                                 # gets the plain re-ask, never a silent hint.
@@ -581,8 +615,13 @@ def main(argv=None) -> None:
                 # Target first: under the flying items, over the background, so
                 # the overlay never blocks the smash payoff. Rebuilt from view()
                 # every frame — no render state is held between frames.
-                render.draw_challenge_target(screen, challenge_view, font,
-                                             images, now)
+                if challenge_view is not None and challenge_view.kind == "spell":
+                    render.draw_challenge_slots(
+                        screen, challenge_view, slot_font, images, now,
+                        guided=app_settings.answer_style == "guided")
+                else:
+                    render.draw_challenge_target(screen, challenge_view, font,
+                                                 images, now)
                 for item in field.items:              # oldest → newest
                     render.draw_item(screen, item, now)
                 render.draw_trail(screen, trail, now)

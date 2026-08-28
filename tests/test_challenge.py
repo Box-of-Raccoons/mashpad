@@ -345,3 +345,71 @@ def test_view_flags_the_gimme(rng):
     _force(d, "b")
     d.poll(46.0)
     assert d.view().gimme is True
+
+
+# ---------------------------------------------------------------------------
+# Caller-supplied pools: spelling words and sums
+# ---------------------------------------------------------------------------
+
+def test_a_word_pool_supplies_rounds(rng):
+    d = ChallengeDirector("spell", rng, pool=["book", "star"])
+    d.start_round(0.0)
+    assert d.round.target in ("book", "star")
+    assert d.round.answer == tuple(d.round.target)
+
+
+def test_a_word_round_restarts_from_its_own_pool(rng):
+    # poll() starts the next round itself, so a director fed one round at a time
+    # would strand every round after the first with an empty pool.
+    d = ChallengeDirector("spell", rng, pool=["hug"])
+    d.start_round(0.0)
+    d.poll(0.0)
+    for i, ch in enumerate("hug"):
+        d.on_key(ch, float(i))
+    kind, round_ = d.poll(10.0)
+    assert kind == "ask"
+    assert round_.target == "hug"
+
+
+def test_a_pool_entry_may_carry_its_own_answer(rng):
+    # A sum's answer is not spelled by its target, so the pool supplies both.
+    d = ChallengeDirector("math", rng, pool=[("3+2", ("5",))])
+    d.start_round(0.0)
+    assert d.round.target == "3+2"
+    assert d.round.answer == ("5",)
+    assert d.round.art is None
+
+
+def test_a_word_is_its_own_picture(rng):
+    # No star.png exists, so the first-letter index would stand a sandwich beside
+    # STAR. A word round draws the word, and the renderer picks sticker or shape.
+    d = ChallengeDirector("spell", rng,
+                          art_names=("sandwich", "sleep", "book"))
+    d.force_round("star")
+    assert d.round.art == "star"
+
+
+def test_a_single_letter_target_still_borrows_a_sticker(rng):
+    d = ChallengeDirector("letter", rng, art_names=("sandwich",))
+    d.force_round("s")
+    assert d.round.art == "sandwich"
+
+
+# ---------------------------------------------------------------------------
+# When a slot landed (the renderer's double-letter cue)
+# ---------------------------------------------------------------------------
+
+def test_view_reports_when_the_last_slot_landed(rng):
+    d = ChallengeDirector("spell", rng, pool=["hug"])
+    d.start_round(0.0)
+    assert d.view().filled_at is None
+    d.on_key("h", 3.0)
+    assert d.view().filled_at == 3.0
+
+
+def test_a_fresh_round_forgets_the_previous_landing(rng):
+    d = ChallengeDirector("spell", rng, pool=["hug", "book"])
+    d.start_round(0.0)
+    d.on_key(d.round.answer[0], 1.0)
+    d.start_round(5.0)
+    assert d.view().filled_at is None

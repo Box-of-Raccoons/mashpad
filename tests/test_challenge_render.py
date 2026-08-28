@@ -182,3 +182,184 @@ screen.fill(render.BACKGROUND)
 render.draw_challenge_target(screen, None, FONT, None, 0.0)
 assert ink_right(screen, 0, 720) is None, "nothing should have been drawn"
 """)
+
+
+# ---------------------------------------------------------------------------
+# The spelling slot row
+# ---------------------------------------------------------------------------
+
+_SLOTS = r"""
+from mashpad.challenge import View
+
+SLOT_FONT = pygame.font.Font(str(paths.app_root() / "assets" / "DejaVuSans-Bold.ttf"),
+                             config.CHALLENGE_SLOT_PX)
+
+
+def word_view(word="book", progress=0, filled_at=None, art=None, step=0):
+    return View(kind="spell", target=word, answer=tuple(word), progress=progress,
+                step=step, gimme=False, art=art, filled_at=filled_at)
+
+
+def draw(v, now=0.0, guided=True, images=None):
+    screen.fill(render.BACKGROUND)
+    render.draw_challenge_slots(screen, v, SLOT_FONT, images, now, guided=guided)
+    return render.challenge_slot_layout(screen.get_width(), screen.get_height(),
+                                        len(v.answer))
+
+
+def peak(rect):
+    # Brightest pixel inside rect, as an R+G+B sum.
+    return max(sum(screen.get_at((x, y))[:3])
+               for x in range(rect.left, rect.right, 2)
+               for y in range(rect.top, rect.bottom, 2))
+
+
+DARK = sum(render.BACKGROUND)
+"""
+
+
+def test_a_spelling_row_has_one_slot_per_letter():
+    _ok(_SLOTS + r"""
+_art, cells = draw(word_view("bubbles"))
+assert len(cells) == 7, len(cells)
+w, h = screen.get_size()
+assert cells[0].left >= 0 and cells[-1].right <= w
+assert all(cells[i].right <= cells[i + 1].left for i in range(len(cells) - 1))
+# The block is centred: equal slack either side.
+assert abs((cells[0].left) - (w - cells[-1].right)) <= 2
+""")
+
+
+def test_the_current_slot_is_the_brightest_letter_in_the_row():
+    _ok(_SLOTS + r"""
+# The glow IS the instruction, so exactly one slot may be bright — at every
+# point of the pulse, including its trough, where a completed letter at full
+# colour would otherwise match it.
+period = render.CHALLENGE_PULSE_PERIOD_S
+for now in (period / 4.0, period * 0.75):            # glow peak, then trough
+    _art, cells = draw(word_view("book", progress=1), now=now)
+    assert peak(cells[1]) > peak(cells[0]), (now, peak(cells[1]), peak(cells[0]))
+    assert peak(cells[1]) > peak(cells[2]), (now, peak(cells[1]), peak(cells[2]))
+""")
+
+
+def test_a_landing_slot_holds_the_next_one_dark_until_it_settles():
+    _ok(_SLOTS + r"""
+# The double-letter rule: after the first O of BOOK the glow must not simply
+# slide to an identical O. The filled letter lands first, and only then does the
+# next slot light.
+v = word_view("book", progress=1, filled_at=1.0)
+_art, cells = draw(v, now=1.0)
+assert peak(cells[0]) > peak(cells[1])          # the landing flash
+during = peak(cells[1])
+
+after = 1.0 + config.CHALLENGE_SLOT_LAND_S + 0.01
+lit = 0
+for k in range(12):                              # sweep a full pulse period
+    draw(v, now=after + k * 0.1)
+    lit = max(lit, peak(cells[1]))
+assert lit > during, (lit, during)
+""")
+
+
+def test_guided_shows_the_letters_still_to_come_and_advanced_does_not():
+    _ok(_SLOTS + r"""
+v = word_view("book", progress=0)
+_art, cells = draw(v, guided=True)
+assert peak(cells[2]) > DARK, peak(cells[2])
+_art, cells = draw(v, guided=False)
+assert peak(cells[2]) == DARK, peak(cells[2])
+# Advanced still draws the bar beneath, so the row reads as slots, not a gap.
+bar = pygame.Rect(cells[2].left, cells[2].bottom, cells[2].width,
+                  render.CHALLENGE_SLOT_BAR_GAP_PX + render.CHALLENGE_SLOT_BAR_PX + 2)
+assert peak(bar) > DARK, peak(bar)
+""")
+
+
+def test_a_shape_word_is_drawn_because_it_has_no_sticker():
+    _ok(_SLOTS + r"""
+# STAR and RING have no PNG; they are config.SHAPES and get drawn instead.
+art, _cells = draw(word_view("star", art="star"), images={})
+assert peak(art) > DARK, peak(art)
+art, _cells = draw(word_view("star", art=None), images={})
+assert peak(art) == DARK, peak(art)
+""")
+
+
+def test_a_sticker_word_uses_its_image():
+    _ok(_SLOTS + r"""
+sticker = pygame.Surface((config.ITEM_SIZE_PX, config.ITEM_SIZE_PX), pygame.SRCALPHA)
+sticker.fill((255, 0, 0, 255))
+art, _cells = draw(word_view("book", art="book"), images={"book": sticker})
+r, g, b = screen.get_at((art.centerx, art.centery))[:3]
+assert r > 200 and g < 40 and b < 40, (r, g, b)
+""")
+
+
+def test_the_keepout_box_covers_the_whole_slot_overlay():
+    _ok(_SLOTS + r"""
+w, h = screen.get_size()
+one = render.challenge_keepout(w, h, 1)
+row = render.challenge_keepout(w, h, 7)
+assert row[2] > one[2], (one, row)
+art_rect, cells = render.challenge_slot_layout(w, h, 7)
+x, y, bw, bh = row
+box = pygame.Rect(int(x), int(y), int(bw), int(bh))
+assert box.contains(art_rect), (box, art_rect)
+assert box.contains(cells[0]) and box.contains(cells[-1])
+""")
+
+
+def test_a_slot_round_keeps_smash_glyphs_off_the_row():
+    _ok(_SLOTS + r"""
+w, h = screen.get_size()
+box = render.challenge_keepout(w, h, 7)
+rng = random.Random(7)
+half = config.ITEM_SIZE_PX / 2.0
+bx, by, bw, bh = box
+for _ in range(2000):
+    x, y = render.spawn_position(rng, w, h, half, box)
+    assert half <= x <= w - half and half <= y <= h - half, (x, y)
+    assert not (bx <= x <= bx + bw and by <= y <= by + bh), (x, y)
+""")
+
+
+def test_a_keepout_covering_the_screen_still_returns_a_position():
+    _ok(r"""
+# Degenerate but reachable on a small window: with no band left, the spawner
+# hands back its sample rather than looping or raising.
+half = config.ITEM_SIZE_PX / 2.0
+rng = random.Random(3)
+x, y = render.spawn_position(rng, 1280, 720, half, (0.0, 0.0, 1280.0, 720.0))
+assert half <= x <= 1280 - half and half <= y <= 720 - half, (x, y)
+""")
+
+
+def test_the_finished_word_floods_to_full_brightness():
+    _ok(_SLOTS + r"""
+# Completed letters sit just under full colour while hunting, so the glow always
+# wins; the moment the word is done there is no glow to lose to, and it floods.
+mid = word_view("book", progress=1)
+done = word_view("book", progress=4)
+_art, cells = draw(mid, now=0.0)
+hunting = peak(cells[0])
+_art, cells = draw(done, now=0.0)
+assert peak(cells[0]) > hunting, (peak(cells[0]), hunting)
+""")
+
+
+def test_advanced_does_not_light_the_letter_it_is_asking_for():
+    _ok(_SLOTS + r"""
+# Advanced shows only what has been won. Lighting the current letter would hand
+# the answer over one slot at a time.
+v = word_view("book", progress=1)
+_art, cells = draw(v, now=render.CHALLENGE_PULSE_PERIOD_S / 4.0, guided=False)
+assert peak(cells[1]) == DARK, peak(cells[1])
+# Its bar still glows, so the child knows which slot is being asked for.
+def bar(c):
+    return pygame.Rect(c.left, c.bottom, c.width,
+                       render.CHALLENGE_SLOT_BAR_GAP_PX
+                       + render.CHALLENGE_SLOT_BAR_PX + 2)
+assert peak(bar(cells[1])) > peak(bar(cells[2])), (peak(bar(cells[1])),
+                                                   peak(bar(cells[2])))
+""")

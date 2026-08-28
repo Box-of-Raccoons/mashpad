@@ -29,7 +29,7 @@ MENU_MARGIN_PX = 40
 # Challenge values the menu is allowed to offer. This list is the per-slice
 # gate: "spell" and "math" are deliberately absent until their slices land, so
 # a grown-up can never select an ask that has no implementation behind it.
-IMPLEMENTED_CHALLENGES = ("none", "letter", "number")
+IMPLEMENTED_CHALLENGES = ("none", "letter", "number", "spell")
 
 # Note auditioned when the Sounds row is switched to Piano (mirrors the voice-row
 # "hello" audition). A mid-range generated note so grown-ups hear the timbre.
