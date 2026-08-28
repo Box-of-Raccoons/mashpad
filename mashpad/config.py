@@ -212,3 +212,22 @@ CHALLENGE_IDLE_S = 120.0
 
 # Challenge: seconds of celebration after a win before the next ask.
 CHALLENGE_WIN_BEAT_S = 1.5
+
+# Challenge: fraction of ITEM_SIZE_PX that NON-target spawns render at, so the
+# full-size centred target stays the biggest glyph on screen during a round.
+CHALLENGE_ITEM_SCALE = 0.7
+
+# Challenge: live-item cap while a round runs (MAX_ITEMS is 20) — fewer glyphs
+# in flight means less of the target occluded exactly when hints are escalating.
+CHALLENGE_MAX_ITEMS = 12
+
+# Challenge: spawn keep-out box around the target, as a multiple of the target's
+# size — random spawn positions never land on top of the answer.
+CHALLENGE_KEEPOUT_SCALE = 1.6
+
+# Challenge: confetti pieces fired around the target on a win.
+CHALLENGE_CONFETTI_N = 10
+
+# Challenge: confetti size as a fraction of ITEM_SIZE_PX (small enough that a
+# ring of them frames the flooded target instead of burying it).
+CHALLENGE_CONFETTI_SCALE = 0.22

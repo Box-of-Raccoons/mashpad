@@ -135,6 +135,7 @@ class ItemField:
         spec: ItemSpec,
         pos: Tuple[float, float],
         now: float,
+        max_items: Optional[int] = None,
     ) -> tuple[Item, bool]:
         """Create and register a new item.
 
@@ -142,10 +143,15 @@ class ItemField:
         non-fading item was force-faded to enforce the MAX_ITEMS cap.
         If all live items are already fading, forced_fade is False (nothing to
         force) — callers should only signal a cap hit when forced_fade is True.
+
+        *max_items* overrides config.MAX_ITEMS for this spawn. A challenge round
+        passes the tighter config.CHALLENGE_MAX_ITEMS so fewer glyphs occlude the
+        target; None keeps the normal cap.
         """
         live = [i for i in self._items if i.state(now) != DEAD]
         forced_fade = False
-        if len(live) >= config.MAX_ITEMS:
+        cap = config.MAX_ITEMS if max_items is None else max_items
+        if len(live) >= cap:
             for candidate in live:  # oldest first
                 if candidate.state(now) not in (FADING, DEAD):
                     candidate.force_fade(now)
