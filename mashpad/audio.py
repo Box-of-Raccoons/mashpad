@@ -47,6 +47,10 @@ class Audio:
         self._utterance: "list[tuple[pygame.mixer.Sound, float]]" = []
         # Latch: an utterance clip has been launched and may still be sounding.
         self._utterance_active: bool = False
+        # When the reactive phrase currently pending or sounding finishes.
+        # play_phrase and speak share the one reserved channel, so an ask has to
+        # know a phrase owns it — otherwise it cuts "You're doing amaz-" in half.
+        self._phrase_until: float = 0.0
 
         if muted:
             print("[mashpad audio] muted (--mute); running silent")
@@ -162,6 +166,7 @@ class Audio:
         now = pygame.time.get_ticks() / 1000.0
         start = self._duck.open(now, clip.get_length())
         self._pending_phrase = (clip, start)
+        self._phrase_until = start + clip.get_length()
 
     @property
     def speaking(self) -> bool:
@@ -216,7 +221,9 @@ class Audio:
         self.cancel_speech(now)
         gap = config.UTTERANCE_GAP_S
         total = sum(c.get_length() for c in clips) + gap * (len(clips) - 1)
-        start = self._duck.open(now, total)
+        # Queue behind a reactive phrase rather than talking over it. The ask is
+        # a second late; being cut in half is worse, and the phrase is short.
+        start = self._duck.open(max(now, self._phrase_until), total)
         offset = 0.0
         for clip in clips:
             clip.set_volume(self._master)
@@ -232,9 +239,14 @@ class Audio:
         """
         if not self._ok:
             return
+        # Only silence the channel when an utterance owns it. play_phrase shares
+        # PHRASE_CHANNEL, and stopping unconditionally cut a reactive phrase off
+        # mid-word whenever a round changed under it.
+        ours = bool(self._utterance) or self._utterance_active
         self._utterance.clear()
         self._utterance_active = False
-        self._phrase_channel.stop()
+        if ours:
+            self._phrase_channel.stop()
         self._duck.release(now)
 
     def challenge_voice(self, required_stems, preferred=None):
