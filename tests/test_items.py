@@ -331,3 +331,33 @@ def test_spawn_no_force_fade_below_cap():
         field.spawn(spec, (i, 0), now)
     _, forced = field.spawn(spec, (99, 0), now)
     assert forced is False
+
+
+# ---------------------------------------------------------------------------
+# max_items override (the challenge layer's tighter cap)
+# ---------------------------------------------------------------------------
+
+def test_spawn_honours_a_tighter_max_items_override():
+    """A challenge round caps the field at CHALLENGE_MAX_ITEMS, not MAX_ITEMS."""
+    field = ItemField()
+    spec = ItemSpec(kind="shape", name="circle", color=(0, 255, 0))
+    now = 0.0
+    cap = config.CHALLENGE_MAX_ITEMS
+    assert cap < config.MAX_ITEMS, "the override must actually be tighter"
+    for i in range(cap):
+        _, forced = field.spawn(spec, (i, 0), now, max_items=cap)
+        assert forced is False
+    oldest = field.items[0]
+    _, forced = field.spawn(spec, (99, 0), now, max_items=cap)
+    assert forced is True
+    assert oldest.state(now) == FADING
+
+
+def test_spawn_without_an_override_still_uses_the_normal_cap():
+    field = ItemField()
+    spec = ItemSpec(kind="shape", name="circle", color=(0, 255, 0))
+    now = 0.0
+    for i in range(config.CHALLENGE_MAX_ITEMS + 1):
+        _, forced = field.spawn(spec, (i, 0), now)
+        assert forced is False, "the tighter cap must not leak into plain smash"
+    assert field.items[0].state(now) != FADING

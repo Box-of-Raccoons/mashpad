@@ -7,17 +7,20 @@
 from __future__ import annotations
 
 import argparse
+import math
 import random
 
 import pygame
 
 from mashpad import (
-    codepanel, codetext, combos, config, imagepack, items, keymap,
-    lockdown as lockdown_mod, melodies, paths, render, settings as settings_mod,
+    challenge as challenge_mod, codepanel, codetext, combos, config, imagepack,
+    items, keymap, lockdown as lockdown_mod, melodies, paths, render,
+    settings as settings_mod,
 )
 from mashpad.audio import Audio
+from mashpad.challenge import ChallengeDirector
 from mashpad.items import ItemField
-from mashpad.menu import Menu
+from mashpad.menu import IMPLEMENTED_CHALLENGES, Menu
 from mashpad.phrases import PhraseDirector
 from mashpad.ratelimit import TokenBucket
 from mashpad.splash import Splash
@@ -67,6 +70,33 @@ def _char_for_event(event) -> str | None:
     return None
 
 
+def _scaled(surface, scale: float):
+    """Resize a freshly built item surface once, at spawn (never per frame)."""
+    if scale == 1.0:
+        return surface
+    return pygame.transform.smoothscale(
+        surface,
+        (max(1, int(round(surface.get_width() * scale))),
+         max(1, int(round(surface.get_height() * scale)))),
+    )
+
+
+def _challenge_stems(round_, level: int) -> tuple[str, ...]:
+    """Stems for one challenge utterance: the ask, or a hint rung.
+
+    Level 0 is both the opening ask and the re-announce a parked round emits on
+    the next press, so it must speak the full carrier again — a child returning
+    after twenty minutes gets no context from a bare "B".
+    """
+    if level <= 1:
+        carrier = ("find-the-number" if round_.kind == "number"
+                   else "find-the-letter")
+        return (carrier, round_.target)
+    if level == 2 and round_.art:
+        return (round_.target, "for", round_.art)   # "B… for… balloon"
+    return (round_.target,)
+
+
 def _draw_babyide_tab(screen, font, tab_h: int, width: int, filename: str) -> None:
     """Draw the fake editor tab bar (a filename chip) across the top."""
     pygame.draw.rect(screen, (30, 30, 42), (0, 0, width, tab_h))
@@ -79,7 +109,8 @@ def _draw_babyide_tab(screen, font, tab_h: int, width: int, filename: str) -> No
 
 def _spawn(field: ItemField, spec, pos, now: float, font, audio: Audio,
            selector: VoiceSelector, letter_case: str, director: PhraseDirector,
-           images=None, note=None) -> None:
+           images=None, note=None, item_scale: float = 1.0,
+           max_items=None) -> None:
     """Register an item, build+cache its render surface once, and fire its audio.
 
     Every allowed spawn advances the voice selector, then plays the clip in the
@@ -89,9 +120,15 @@ def _spawn(field: ItemField, spec, pos, now: float, font, audio: Audio,
     Also feeds the phrase director: if spawn force-faded a live item to enforce
     the MAX_ITEMS cap, arms 'screenfull'; the spawn itself — with the live image
     count — drives hello / fun / raccoons.
+
+    *item_scale* and *max_items* are the challenge layer's two occlusion knobs:
+    non-target spawns shrink to CHALLENGE_ITEM_SCALE and the field caps at
+    CHALLENGE_MAX_ITEMS so the centred target stays readable under a mash.
     """
-    item, forced_fade = field.spawn(spec, pos, now)
-    item.surface = render.build_item_surface(spec, font, images, letter_case=letter_case)
+    item, forced_fade = field.spawn(spec, pos, now, max_items=max_items)
+    item.surface = _scaled(
+        render.build_item_surface(spec, font, images, letter_case=letter_case),
+        item_scale)
     selector.on_keystroke()
     audio.play_for(spec, rng, voice=selector.current(), note=note)
     raccoons = sum(
@@ -200,6 +237,30 @@ def main(argv=None) -> None:
         # voice_mode as it was when the menu opened — used to detect a rebuild on close.
         menu_open_voice_mode = app_settings.voice_mode
 
+        def _build_challenge():
+            """The round director for the selected challenge, or None for plain smash.
+
+            BabyIDE has no glyph field to overlay a target on, so a challenge
+            simply does not run there. Only values the menu can actually select
+            are built: a hand-edited settings.json naming an unshipped challenge
+            would otherwise draw from an empty target pool.
+            """
+            if (app_settings.display_mode == "babyide"
+                    or app_settings.challenge == "none"
+                    or app_settings.challenge not in IMPLEMENTED_CHALLENGES):
+                return None
+            return ChallengeDirector(
+                app_settings.challenge, rng,
+                art_names=[e.name for e in _image_entries],
+            )
+
+        challenge = _build_challenge()
+        # (challenge, display_mode) as they were when the menu opened — a change
+        # rebuilds the director on close, so the row isn't dead until a reboot.
+        menu_open_challenge = (app_settings.challenge, app_settings.display_mode)
+        # The pack speaking the current round; resolved once per ask, None = silent.
+        challenge_voice = None
+
         field = ItemField()
         trail = Trail()
         # Piano-mode melody sequencer: one note per allowed spawn, stepping
@@ -219,6 +280,43 @@ def main(argv=None) -> None:
 
         width, height = screen.get_size()
         half = config.ITEM_SIZE_PX / 2.0  # keep keyboard spawns fully on-screen
+
+        def _celebrate(spec, note, now: float) -> None:
+            """The win payoff: the key's own sound, confetti, a raccoon, a line.
+
+            Deliberately does NOT spawn a random-position glyph. The target
+            flooding with colour is the answer; a second B somewhere else muddies
+            which one the child found.
+            """
+            # The ask has been answered — drop any hint still queued so the
+            # celebration line doesn't fight it for PHRASE_CHANNEL.
+            audio.cancel_speech(now)
+            audio.play_for(spec, rng, voice=selector.current(), note=note)
+            cx, cy = width / 2.0, height / 2.0
+            reach = config.ITEM_SIZE_PX * config.CHALLENGE_KEEPOUT_SCALE / 2.0
+            for i in range(config.CHALLENGE_CONFETTI_N):
+                # Ring the keep-out box, jittered — an exact circle reads mechanical.
+                angle = 2.0 * math.pi * (i + rng.random()) / config.CHALLENGE_CONFETTI_N
+                far = reach * rng.uniform(1.0, 1.35)
+                pos = (min(max(cx + far * math.cos(angle), 0.0), float(width)),
+                       min(max(cy + far * math.sin(angle), 0.0), float(height)))
+                piece = keymap.item_for_key(None, rng, ())   # always a plain shape
+                item, _forced = field.spawn(piece, pos, now,
+                                            max_items=config.CHALLENGE_MAX_ITEMS)
+                item.surface = _scaled(
+                    render.build_item_surface(piece, font, images,
+                                              letter_case=app_settings.letter_case),
+                    config.CHALLENGE_CONFETTI_SCALE)
+            if _extras:
+                rspec = keymap.item_for_key(None, rng, _extras, image_weight=1.0)
+                if rspec.kind == "image":
+                    side = rng.choice((-1.0, 1.0))
+                    rpos = (min(max(cx + side * reach * 1.15, half), width - half), cy)
+                    ritem, _forced = field.spawn(rspec, rpos, now,
+                                                 max_items=config.CHALLENGE_MAX_ITEMS)
+                    ritem.surface = render.build_item_surface(
+                        rspec, font, images, letter_case=app_settings.letter_case)
+            audio.play_phrase("fun", rng, selector.current())
 
         # BabyIDE mode: source token stream (resumed from the saved cursor) + a
         # scrolling code panel below a filename tab. Built once; only used when
@@ -245,6 +343,16 @@ def main(argv=None) -> None:
         while running:
             now = pygame.time.get_ticks() / 1000.0
 
+            # The three occlusion knobs, live only while a challenge is running:
+            # smaller non-target glyphs, a tighter field cap, and a keep-out box
+            # random spawns dodge. All three are required to keep the target
+            # readable during exactly the mashing that escalates the hints.
+            challenge_on = challenge is not None
+            item_scale = config.CHALLENGE_ITEM_SCALE if challenge_on else 1.0
+            max_items = (config.CHALLENGE_MAX_ITEMS if challenge_on
+                         else config.MAX_ITEMS)
+            keepout = render.challenge_keepout(width, height) if challenge_on else None
+
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
@@ -262,6 +370,12 @@ def main(argv=None) -> None:
                             selector = VoiceSelector(
                                 audio.voices, app_settings.voice_mode, genders, rng,
                             )
+                        # A Challenge or Display change takes effect on close, not
+                        # at the next boot — the grown-up is watching the screen.
+                        if ((app_settings.challenge, app_settings.display_mode)
+                                != menu_open_challenge):
+                            challenge = _build_challenge()
+                            challenge_voice = None
                     continue
 
                 # Splash: the first key press / click dismisses it, then the very
@@ -281,6 +395,8 @@ def main(argv=None) -> None:
                         continue
                     if combo == combos.OPTIONS:
                         menu_open_voice_mode = app_settings.voice_mode
+                        menu_open_challenge = (app_settings.challenge,
+                                               app_settings.display_mode)
                         menu.open()
                         continue
                     if app_settings.display_mode == "babyide":
@@ -330,19 +446,35 @@ def main(argv=None) -> None:
                         else:
                             director.note_drop(now)
                         continue
+                    char = _char_for_event(event)
+                    # Judge BEFORE the bucket: the child pressed a key, and the
+                    # rate limiter's opinion says nothing about whether they are
+                    # trying. Lowercased because _char_for_event preserves shift
+                    # /caps case and the director's answers are lowercase.
+                    verdict = challenge_mod.IGNORED
+                    if challenge is not None:
+                        verdict = challenge.on_key(
+                            char.lower() if char else None, now)
                     image_weight = config.RACCOON_WEIGHTS.get(app_settings.raccoon_amount, config.RACCOON_WEIGHTS["normal"])
                     spec = keymap.item_for_key(
-                        _char_for_event(event), rng, _extras, image_weight=image_weight
+                        char, rng, _extras, image_weight=image_weight
                     )
-                    if bucket.try_take(now):
-                        pos = (rng.uniform(half, width - half),
-                               rng.uniform(half, height - half))
-                        # Advance the melody only on an allowed spawn (piano mode);
-                        # dings mode passes note=None → a random effect.
+                    # Advance the melody only on an allowed spawn (piano mode);
+                    # dings mode passes note=None → a random effect.
+                    if verdict == challenge_mod.CORRECT:
+                        # The winning press bypasses the bucket entirely: a
+                        # mashing toddler empties it, and swallowing the one
+                        # press that must land would break the whole mode.
+                        note = (sequencer.next()
+                                if app_settings.sound_mode == "piano" else None)
+                        _celebrate(spec, note, now)
+                    elif bucket.try_take(now):
+                        pos = render.spawn_position(rng, width, height, half, keepout)
                         note = (sequencer.next()
                                 if app_settings.sound_mode == "piano" else None)
                         _spawn(field, spec, pos, now, font, audio, selector,
-                               app_settings.letter_case, director, images, note)
+                               app_settings.letter_case, director, images, note,
+                               item_scale=item_scale, max_items=max_items)
                     else:
                         director.note_drop(now)
 
@@ -352,15 +484,27 @@ def main(argv=None) -> None:
                 elif event.type == pygame.MOUSEBUTTONDOWN:
                     if app_settings.display_mode == "babyide":
                         continue  # BabyIDE is a key smasher; ignore clicks
+                    # A click is baby input like any other press: it feeds the
+                    # ladder, and at the any-key step it can win the round.
+                    verdict = challenge_mod.IGNORED
+                    if challenge is not None:
+                        verdict = challenge.on_key(None, now)
                     # Click → shape at the cursor, through the SAME rate-limit bucket.
                     image_weight = config.RACCOON_WEIGHTS.get(app_settings.raccoon_amount, config.RACCOON_WEIGHTS["normal"])
                     spec = keymap.item_for_key(None, rng, _extras, image_weight=image_weight)
-                    if bucket.try_take(now):
+                    if verdict == challenge_mod.CORRECT:
+                        note = (sequencer.next()
+                                if app_settings.sound_mode == "piano" else None)
+                        _celebrate(spec, note, now)
+                    elif bucket.try_take(now):
                         # Clicks advance the melody too (piano mode); see above.
                         note = (sequencer.next()
                                 if app_settings.sound_mode == "piano" else None)
+                        # The child pointed here, so a click ignores the keep-out
+                        # box; only random spawns dodge the target.
                         _spawn(field, spec, event.pos, now, font, audio, selector,
-                               app_settings.letter_case, director, images, note)
+                               app_settings.letter_case, director, images, note,
+                               item_scale=item_scale, max_items=max_items)
                     else:
                         director.note_drop(now)
 
@@ -368,11 +512,49 @@ def main(argv=None) -> None:
             trail.prune(now)
             audio.update(now)  # start due phrases + apply the duck envelope
 
+            # Challenge round clock and events, once per frame. The clock only
+            # runs while the child can act on it: a 40-second options visit would
+            # otherwise escalate the round to a gimme behind their back, and the
+            # first ask waits for the splash so it can't cut off startup 'hello'.
+            challenge_view = None
+            if challenge is not None:
+                if menu.visible or splash.visible:
+                    challenge.pause(now)
+                else:
+                    challenge.resume(now)
+                    if challenge.round is None:
+                        challenge.start_round(now)
+                    signal = challenge.poll(now)
+                    if signal is not None:
+                        kind, payload = signal
+                        round_ = challenge.round
+                        # Level 0 is the ask; a parked round re-announces as hint 0.
+                        level = 0 if kind == "ask" else payload
+                        if kind == "ask":
+                            challenge_voice = audio.challenge_voice(
+                                _challenge_stems(round_, 0),
+                                preferred=selector.current())
+                        print(f"[mashpad] challenge {kind} {round_.target!r} "
+                              f"step {level} ({challenge_voice or 'silent'})")
+                        if challenge_voice is not None:
+                            stems = _challenge_stems(round_, level)
+                            if not audio.speak(stems, challenge_voice, rng, now):
+                                # A pack with the ask but no "B for balloon" still
+                                # gets the plain re-ask, never a silent hint.
+                                audio.speak((round_.target,), challenge_voice,
+                                            rng, now)
+                challenge_view = challenge.view()
+
             # Reactive phrases: once per frame, when enabled and the menu is closed.
             # The splash does NOT gate polling — hello greets over it at startup;
             # nothing else can be armed before the first input dismisses it. Rotate
             # the voice first (cycle mode) so the comment speaks in the new voice.
-            if app_settings.phrases and not menu.visible:
+            # Suppressed outright while a challenge utterance is queued or
+            # sounding: the gate has to sit here, ahead of poll(), because a
+            # trigger armed this frame would otherwise fire play_phrase and cut a
+            # word out of "Find the letter B". Nothing backs up — armed triggers
+            # expire on PHRASE_ARM_TTL_S.
+            if app_settings.phrases and not menu.visible and not audio.speaking:
                 # Keep the fun/manager cadence matched to the current mode (a
                 # Display toggle mid-session switches Smash <-> BabyIDE pacing).
                 director.set_fun_every(
@@ -396,6 +578,11 @@ def main(argv=None) -> None:
                     render.draw_item(screen, item, now)
                 _draw_babyide_tab(screen, tab_font, tab_h, width, code_stream.current_file)
             else:
+                # Target first: under the flying items, over the background, so
+                # the overlay never blocks the smash payoff. Rebuilt from view()
+                # every frame — no render state is held between frames.
+                render.draw_challenge_target(screen, challenge_view, font,
+                                             images, now)
                 for item in field.items:              # oldest → newest
                     render.draw_item(screen, item, now)
                 render.draw_trail(screen, trail, now)
