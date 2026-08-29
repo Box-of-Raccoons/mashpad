@@ -712,3 +712,41 @@ for _ in range(400):
     hit = item.clip(glyph)
     assert min(hit.width, hit.height) == 0, (x, y)
 """)
+
+
+def test_a_numeral_never_lands_on_the_blocks_it_counts():
+    _ok(_BLOCKS + r"""
+# The numeral line hangs below the groups. Measuring it from group A alone put
+# it inside group B's blocks whenever B wrapped to more rows than A, which the
+# Pi showed at three rows and which starts at two.
+for w, h in ((1280, 720), (1920, 1080)):
+    for tier in ("2-9", "0-20"):
+        for target, answer in counting.pool(tier, "both"):
+            lay = render.challenge_blocks_layout(w, h, target, len(answer), True)
+            spots = [(lay["rect_a"].centerx, str(lay["a"]))]
+            if lay["op"] == "+":
+                spots.append((lay["rect_b"].centerx, str(lay["b"])))
+            for cx, text in spots:
+                glyph = SLOT_FONT.render(text, True, (255, 255, 255))
+                nr = glyph.get_rect(center=(cx, int(lay["num_y"])))
+                assert 0 <= nr.top and nr.bottom <= h, (w, h, target, nr)
+                for blk in lay["blocks_a"] + lay["blocks_b"]:
+                    assert not nr.colliderect(blk), (w, h, target, nr, blk)
+""")
+
+
+def test_a_taller_group_pushes_the_whole_equation_up():
+    _ok(_BLOCKS + r"""
+# Hardy's fix: give the numerals room by lifting the blocks, rather than
+# letting a tall sum sag off the bottom of a centred midline.
+flat = render.challenge_blocks_layout(1920, 1080, "1+1", 1, True)
+tall = render.challenge_blocks_layout(1920, 1080, "1+13", 2, True)
+assert tall["blocks_b"][0].top < flat["blocks_b"][0].top, (
+    tall["blocks_b"][0], flat["blocks_b"][0])
+# And the stack stays centred: as much room above the blocks as below the
+# numerals, within a pixel of rounding.
+for lay, target in ((flat, "1+1"), (tall, "1+13")):
+    box = render._bounds(lay["blocks_a"] + lay["blocks_b"])
+    below = 1080 - (lay["num_y"] + config.CHALLENGE_SLOT_PX / 2)
+    assert abs(box.top - below) <= 2, (target, box.top, below)
+""")

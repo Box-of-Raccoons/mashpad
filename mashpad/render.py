@@ -686,6 +686,11 @@ def _dimmed(color, alpha: int):
                  for i in range(3))
 
 
+def _grid_rows(n: int, per_row: int) -> int:
+    """Rows a group of *n* blocks wraps to. One row even when the group is empty."""
+    return max(1, (n + per_row - 1) // per_row)
+
+
 def _block_grid(n: int, left: float, mid_y: float, size: int, per_row: int,
                 gap: int):
     """([rects], width) for *n* blocks in rows of *per_row*, centred on mid_y.
@@ -719,16 +724,27 @@ def challenge_blocks_layout(width: int, height: int, target: str, slots: int,
     Addition is two groups with an operator between them; subtraction is one
     group whose last blocks are leaving, so it has no second group and no second
     colour. The answer column is the slot row, with the guided answer pile above
-    it. Groups sit on a single midline and their numerals hang below.
+    it. Groups sit on a single midline and their numerals hang below it.
+
+    The numeral line is measured from the DEEPER of the two groups, and the
+    whole stack is centred as one block rather than the groups alone. Hanging
+    the numerals off group A put them inside group B's blocks whenever B wrapped
+    to more rows than A, which is 76 of the sums the two tiers can ask.
     """
     a, op, b = counting.parse(target)
     size = config.CHALLENGE_BLOCK_PX
     gap = config.CHALLENGE_BLOCK_GAP_PX
     per_row = config.CHALLENGE_BLOCK_ROW_MAX
-    mid_y = height / 2.0
     op_w = config.CHALLENGE_SLOT_PX
 
     plus = op == "+"
+    rows = max(_grid_rows(a, per_row), _grid_rows(b, per_row) if plus else 1)
+    grid_h = rows * size + (rows - 1) * gap
+    num_h = config.CHALLENGE_SLOT_PX
+    content_h = grid_h + CHALLENGE_NUM_GAP_PX + num_h
+    top = height / 2.0 - content_h / 2.0
+    mid_y = top + grid_h / 2.0
+    num_y = top + grid_h + CHALLENGE_NUM_GAP_PX + num_h / 2.0
     result_n = a + b if plus else a - b
     result_w = 0
     if guided and result_n:
@@ -780,6 +796,7 @@ def challenge_blocks_layout(width: int, height: int, target: str, slots: int,
         "rect_a": a_rect, "rect_b": b_rect,
         "op_pos": (op_x, mid_y) if op_x is not None else None,
         "eq_pos": (eq_x, mid_y),
+        "num_y": num_y,
         "result": result,
         "cells": cells,
     }
@@ -881,7 +898,7 @@ def draw_challenge_blocks(screen: "pygame.Surface", view,
         screen.blit(surf, surf.get_rect(center=(int(round(center[0])),
                                                 int(round(center[1])))))
 
-    num_y = layout["rect_a"].bottom + CHALLENGE_NUM_GAP_PX + config.CHALLENGE_SLOT_PX // 2
+    num_y = layout["num_y"]
     if plus:
         glyph(str(layout["a"]), color_a, (layout["rect_a"].centerx, num_y))
         glyph(str(layout["b"]), color_b, (layout["rect_b"].centerx, num_y))
@@ -976,8 +993,7 @@ def challenge_round_keepout(width: int, height: int, round_):
     # The numerals are drawn from font metrics, so they are not rects in the
     # layout. A subtraction's "16 - 15" is three glyphs under a group five
     # blocks across, and it hangs below all of them.
-    num_y = (layout["rect_a"].bottom + CHALLENGE_NUM_GAP_PX
-             + config.CHALLENGE_SLOT_PX // 2)
+    num_y = layout["num_y"]
     a, b = layout["a"], layout["b"]
     if layout["op"] == "+":
         runs = [(layout["rect_a"].centerx, len(str(a))),
