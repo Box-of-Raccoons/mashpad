@@ -298,7 +298,7 @@ def test_panel_fits_with_every_row_visible():
     _ok("""
 m, s, a = make()
 s.challenge = "math"
-assert len(m._rows()) == 12, labels(m)
+assert len(m._rows()) == 13, labels(m)
 screen = pygame.Surface((1280, 720))
 m.draw(screen)
 assert m.panel_height(720) <= 720, m.panel_height(720)
@@ -422,4 +422,43 @@ m.handle_event(key(pygame.K_RIGHT))
 import json
 saved = json.loads(Path(m._save_path).read_text(encoding="utf-8"))
 assert saved["math_ops"] == s.math_ops, saved
+""")
+
+
+# ---------------------------------------------------------------------------
+# The Timeout row (how long an unanswered ask stays on screen)
+# ---------------------------------------------------------------------------
+
+def test_timeout_row_appears_for_any_challenge_but_not_for_none():
+    _ok("""
+m, s, a = make()
+s.challenge = "none"
+assert "Timeout" not in labels(m), labels(m)
+for ch in ("letter", "number", "spell", "math"):
+    s.challenge = ch
+    assert "Timeout" in labels(m), (ch, labels(m))
+""")
+
+
+def test_timeout_row_cycles_through_every_value():
+    _ok("""
+from mashpad import settings as settings_mod
+m, s, a = make()
+s.challenge = "letter"
+select(m, "Timeout")
+seen = set()
+for _ in range(len(settings_mod.CHALLENGE_TIMEOUTS) + 2):
+    seen.add(s.challenge_timeout)
+    m.handle_event(key(pygame.K_RIGHT))
+assert seen == set(settings_mod.CHALLENGE_TIMEOUTS), seen
+""")
+
+
+def test_timeout_row_reads_in_minutes():
+    _ok("""
+m, s, a = make()
+s.challenge = "letter"
+s.challenge_timeout = 5
+row = [r for r in m._row_specs() if r[0] == "challenge_timeout"][0]
+assert row[2] == "5 min", row
 """)

@@ -35,6 +35,9 @@ MATH_RANGES = ("2-9", "0-20")
 # Which sums the math challenge asks. Adding is the easier half, and a child
 # who has just met counting can stay on it until taking away makes sense.
 MATH_OPS = ("add", "subtract", "both")
+# Minutes of no input before a challenge clears the screen. A kiosk left on
+# all day must not sit there showing one unanswered ask until bedtime.
+CHALLENGE_TIMEOUTS = (2, 3, 5)
 # Voice-mode selection constants.
 VOICE_MODE_RANDOM = "random"
 VOICE_MODE_CYCLE = "cycle"
@@ -65,6 +68,8 @@ class Settings:
     math_range: str = "2-9"
     # "add" | "subtract" | "both" — which sums the math ask draws from.
     math_ops: str = "both"
+    # Minutes of no input before a challenge clears itself off the screen.
+    challenge_timeout: int = 2
 
 
 def _from_dict(raw: dict) -> Settings:
@@ -122,6 +127,10 @@ def _from_dict(raw: dict) -> Settings:
     if mo in MATH_OPS:
         s.math_ops = mo
 
+    ct = raw.get("challenge_timeout")
+    if ct in CHALLENGE_TIMEOUTS:
+        s.challenge_timeout = ct
+
     return s
 
 
@@ -159,6 +168,7 @@ def save(settings: Settings, path: Path) -> bool:
         "answer_style": settings.answer_style,
         "math_range": settings.math_range,
         "math_ops": settings.math_ops,
+        "challenge_timeout": settings.challenge_timeout,
     }
     try:
         with open(tmp, "w", encoding="utf-8") as fh:

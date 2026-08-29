@@ -75,9 +75,14 @@ def _art_index(art_names):
 class ChallengeDirector:
     """Owns one round at a time: the ask, the judging, and the hint ladder."""
 
-    def __init__(self, kind: str, rng, art_names=(), pool=None) -> None:
+    def __init__(self, kind: str, rng, art_names=(), pool=None,
+                 idle_s=None) -> None:
         self._kind = kind
         self._rng = rng
+        # Seconds of silence before the round clears itself off the screen.
+        # The grown-up menu owns this; the default keeps every existing
+        # caller and test on config.CHALLENGE_IDLE_S.
+        self._idle_s = config.CHALLENGE_IDLE_S if idle_s is None else idle_s
         # The pool has to live in here rather than being fed a round at a time:
         # poll() restarts the round itself after the win beat, and a director
         # with nothing to draw from would strand every round after the first.
@@ -223,11 +228,12 @@ class ChallengeDirector:
             return IGNORED
 
         if self._parked:
-            # Coming back after a long absence starts the round over rather than
-            # dropping the child into an already-escalated ladder.
-            self._parked = False
-            self._reset_ladder(now)
-            self._pending_hint = 0
+            # Coming back after a long absence gets a WHOLE new round, not the
+            # one that was on screen when everyone walked away. The old ask has
+            # no context left, and this press is what woke the app up rather
+            # than an attempt at answering it, so it is not judged.
+            self.start_round(now)
+            return IGNORED
         self._last_input_at = now
 
         if (self._last_counted_at is None
@@ -270,7 +276,7 @@ class ChallengeDirector:
                 return ("ask", self._round)
             return None
 
-        if not self._paused and now - self._last_input_at > config.CHALLENGE_IDLE_S:
+        if not self._paused and now - self._last_input_at > self._idle_s:
             self._parked = True
             return None
 
@@ -295,7 +301,13 @@ class ChallengeDirector:
     # ------------------------------------------------------------------- view
 
     def view(self) -> "View | None":
-        if self._round is None:
+        """What to draw, or None to draw nothing at all.
+
+        A parked round draws nothing: the whole point of parking is that an
+        unanswered ask must not sit on a kiosk screen all afternoon. The next
+        press brings a fresh one back.
+        """
+        if self._round is None or self._parked:
             return None
         return View(
             kind=self._round.kind,

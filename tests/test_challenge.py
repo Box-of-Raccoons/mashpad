@@ -260,7 +260,9 @@ def test_idle_parks_the_round(rng):
     assert d.parked
 
 
-def test_input_after_idle_re_announces(rng):
+def test_input_after_idle_starts_a_whole_new_round(rng):
+    # The ask that was on screen when everyone walked away has no context left,
+    # so coming back deals a fresh one rather than re-announcing the old one.
     d = _letter_director(rng)
     _force(d, "b")
     d.on_key("k", 1.0)
@@ -268,7 +270,55 @@ def test_input_after_idle_re_announces(rng):
     d.poll(parked_at)
     d.on_key("k", parked_at + 1.0)
     assert not d.parked
-    assert d.poll(parked_at + 1.0) == ("hint", 0)
+    kind, round_ = d.poll(parked_at + 1.0)
+    assert kind == "ask"
+    assert round_ is d.round
+
+
+def test_a_parked_round_draws_nothing(rng):
+    # The whole point of parking: an unanswered ask must not sit on a kiosk
+    # screen all afternoon.
+    d = _letter_director(rng)
+    _force(d, "b")
+    d.on_key("k", 1.0)
+    assert d.view() is not None
+    d.poll(1.0 + config.CHALLENGE_IDLE_S + 1.0)
+    assert d.parked
+    assert d.view() is None
+
+
+def test_the_press_that_wakes_a_parked_round_is_not_judged(rng):
+    # That press woke the app up; it was not an attempt at an ask nobody could
+    # still see. Winning on it would celebrate nothing.
+    d = _letter_director(rng)
+    _force(d, "b")
+    d.on_key("k", 1.0)
+    d.poll(1.0 + config.CHALLENGE_IDLE_S + 1.0)
+    verdict = d.on_key("b", 1.0 + config.CHALLENGE_IDLE_S + 2.0)
+    assert verdict == IGNORED
+    assert d.progress == 0
+
+
+def test_the_idle_timeout_is_configurable(rng):
+    d = ChallengeDirector("letter", rng, idle_s=30.0)
+    d.start_round(0.0)
+    d.poll(0.0)
+    d.on_key("k", 1.0)
+    d.poll(20.0)
+    assert not d.parked          # config default would still be awake here too
+    d.poll(1.0 + 30.0 + 1.0)
+    assert d.parked              # but the configured 30s has run out
+
+
+def test_the_default_timeout_is_the_config_value(rng):
+    d = ChallengeDirector("letter", rng)
+    d.start_round(0.0)
+    d.poll(0.0)
+    d.on_key("k", 1.0)
+    d.poll(1.0 + config.CHALLENGE_IDLE_S - 1.0)
+    assert not d.parked
+    d.poll(1.0 + config.CHALLENGE_IDLE_S + 1.0)
+    assert d.parked
 
 
 # ---------------------------------------------------------------------------
