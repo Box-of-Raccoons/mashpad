@@ -178,6 +178,7 @@ Ctrl+Alt+O again) to close the menu.
 | **Answers** | **Guided/Advanced**. Only shown for Spelling and Math. Guided ghosts the letters still to come and shows a sum's total as a pile of blocks; Advanced hides both and leaves the picture and the announcer to carry it. |
 | **Numbers** | **2 to 9 / 0 to 20**. Only shown for Math. The 0 to 20 tier asks for two-digit answers, so it needs two key presses. |
 | **Sums** | **Adding / Taking away / Both** (default Both). Only shown for Math. |
+| **Timeout** | **2 / 3 / 5 min** (default 2). Only shown when a challenge is on. How long an unanswered ask stays on screen with no input before it clears itself away. |
 
 Every change is saved immediately (and again on close) to `settings.json` in the
 repo root. That file is device-local and git-ignored — deleting it restores the
@@ -235,8 +236,14 @@ altogether is exactly the one who needs rescuing.
 
 Getting a letter right in a spelling or two-digit answer resets the ladder, so
 every slot starts fresh. The round clock stops while the options menu or the
-splash is up, and a round parks itself after two minutes of silence rather than
-nagging an empty room; the next press re-announces it from the top.
+splash is up.
+
+After the time set by **Timeout** with no input at all, the round clears itself
+off the screen completely and the app goes back to plain smashing. A Pi left on
+all day must not still be showing one unanswered ask at bedtime. The next press
+deals a whole new round rather than bringing the old one back: that ask has no
+context left, and the press was someone waking the app up, not answering it, so
+it cannot win a round nobody could see.
 
 ### Spelling words
 

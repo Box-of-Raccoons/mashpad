@@ -229,6 +229,12 @@ class Menu:
             self._settings.math_ops, settings_mod.MATH_OPS, direction or 1)
         self._save()
 
+    def _step_challenge_timeout(self, direction: int) -> None:
+        self._settings.challenge_timeout = self._cycle(
+            self._settings.challenge_timeout, settings_mod.CHALLENGE_TIMEOUTS,
+            direction or 1)
+        self._save()
+
     def _save(self) -> None:
         settings_mod.save(self._settings, self._save_path)
 
@@ -284,6 +290,9 @@ class Menu:
                          "2 to 9" if s.math_range == "2-9" else "0 to 20"))
             rows.append(("math_ops", "Sums",
                          self._MATH_OP_LABELS.get(s.math_ops, "Both")))
+        if s.challenge != "none":
+            rows.append(("challenge_timeout", "Timeout",
+                         f"{s.challenge_timeout} min"))
         rows.append(("quit", "Quit", ""))
         return rows
 

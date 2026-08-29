@@ -297,6 +297,7 @@ def main(argv=None) -> None:
                 app_settings.challenge, rng,
                 art_names=[e.name for e in _image_entries],
                 pool=pool,
+                idle_s=app_settings.challenge_timeout * 60.0,
             )
 
         def _challenge_signature():
@@ -308,7 +309,7 @@ def main(argv=None) -> None:
             """
             return (app_settings.challenge, app_settings.display_mode,
                     app_settings.answer_style, app_settings.math_range,
-                    app_settings.math_ops)
+                    app_settings.math_ops, app_settings.challenge_timeout)
 
         challenge = _build_challenge()
         # The signature as it was when the menu opened — a change rebuilds the
@@ -406,7 +407,10 @@ def main(argv=None) -> None:
             # smaller non-target glyphs, a tighter field cap, and a keep-out box
             # random spawns dodge. All three are required to keep the target
             # readable during exactly the mashing that escalates the hints.
-            challenge_on = challenge is not None
+            # A parked round draws nothing, so nothing needs protecting from
+            # the smash: while it is parked the app is plain smash mode again,
+            # full-size glyphs and all.
+            challenge_on = challenge is not None and not challenge.parked
             item_scale = config.CHALLENGE_ITEM_SCALE if challenge_on else 1.0
             max_items = (config.CHALLENGE_MAX_ITEMS if challenge_on
                          else config.MAX_ITEMS)

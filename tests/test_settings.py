@@ -63,7 +63,7 @@ def test_save_writes_all_keys(tmp_path):
     assert set(data) == {
         "voice_mode", "volume", "letter_case", "raccoon_amount", "phrases",
         "sound_mode", "display_mode", "challenge", "answer_style", "math_range",
-        "math_ops",
+        "math_ops", "challenge_timeout",
     }
 
 
@@ -86,6 +86,27 @@ def test_math_ops_round_trips(tmp_path):
     s.math_ops = "subtract"
     save(s, p)
     assert load(p).math_ops == "subtract"
+
+
+def test_challenge_timeout_defaults_to_two_minutes():
+    assert Settings().challenge_timeout == 2
+
+
+def test_a_bad_challenge_timeout_falls_back_without_losing_its_siblings(tmp_path):
+    p = tmp_path / "settings.json"
+    p.write_text(json.dumps({"challenge_timeout": 99, "volume": 40}),
+                 encoding="utf-8")
+    s = load(p)
+    assert s.challenge_timeout == 2
+    assert s.volume == 40
+
+
+def test_challenge_timeout_round_trips(tmp_path):
+    p = tmp_path / "settings.json"
+    s = Settings()
+    s.challenge_timeout = 5
+    save(s, p)
+    assert load(p).challenge_timeout == 5
 
 
 def test_save_atomic_leaves_no_tmp(tmp_path):
